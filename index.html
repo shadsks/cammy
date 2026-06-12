@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shoebox - instant camera</title>
+<meta name="theme-color" content="#1c1916">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%23f6f2ea'/%3E%3Crect x='3' y='3' width='10' height='8' fill='%231c1916'/%3E%3Ccircle cx='8' cy='7' r='2.6' fill='%23e23b2a'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600&family=Space+Grotesk:wght@400;500;600;700&family=VT323&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="bg-cork demo">
+
+  <!-- the desk / photo wall -->
+  <div id="wall" aria-label="Photo wall"></div>
+  <div class="wall-shade" aria-hidden="true"></div>
+  <div class="wall-grain" aria-hidden="true"></div>
+
+  <header class="brand">
+    <h1>SHOEBOX</h1>
+    <p>instant camera</p>
+  </header>
+
+  <nav class="topbar">
+    <button id="btnDarkroom" type="button">Darkroom</button>
+    <button id="btnExport" type="button">Save wall</button>
+    <button id="btnClear" type="button">Clear</button>
+    <button id="btnSound" type="button" aria-pressed="true">Sound: on</button>
+  </nav>
+
+  <aside id="darkroom" class="panel" hidden>
+    <h2>Darkroom</h2>
+
+    <section>
+      <h3>Film stock</h3>
+      <div class="stocks" id="stocks"></div>
+    </section>
+
+    <section>
+      <h3>Effects</h3>
+      <div class="sliders">
+        <label>Grain        <input type="range" id="fxGrain"    min="0" max="100" value="28"><output>28</output></label>
+        <label>Vignette     <input type="range" id="fxVignette" min="0" max="100" value="34"><output>34</output></label>
+        <label>Light leak   <input type="range" id="fxLeak"     min="0" max="100" value="22"><output>22</output></label>
+        <label>Dust         <input type="range" id="fxDust"     min="0" max="100" value="12"><output>12</output></label>
+      </div>
+    </section>
+
+    <section>
+      <h3>Strip layout</h3>
+      <div class="seg" id="stripSeg">
+        <button type="button" data-layout="strip" class="on">1 x 4</button>
+        <button type="button" data-layout="grid">2 x 2</button>
+      </div>
+    </section>
+
+    <section>
+      <h3>Frame</h3>
+      <div class="swatches" id="frames"></div>
+    </section>
+
+    <section>
+      <h3>Surface</h3>
+      <div class="swatches" id="surfaces"></div>
+    </section>
+  </aside>
+
+  <!-- the camera -->
+  <div id="camera">
+    <div id="ejector"></div>
+    <div class="cam-shell">
+      <div class="cam-top"><div class="slot"></div></div>
+      <div class="cam-face">
+        <div class="vf-ring">
+          <div class="viewfinder" id="viewfinder">
+            <video id="vfVideo" autoplay playsinline muted hidden></video>
+            <canvas id="vfDemo" width="720" height="720"></canvas>
+            <img id="vfGhost" alt="" hidden>
+            <div class="vf-tint" aria-hidden="true"></div>
+            <div class="vf-leak" aria-hidden="true"></div>
+            <div class="vf-vignette" aria-hidden="true"></div>
+            <div class="vf-grain" aria-hidden="true"></div>
+            <div class="vf-rail" id="vfRail" hidden></div>
+            <div class="vf-count" id="vfCount" hidden></div>
+          </div>
+        </div>
+        <div class="cam-right">
+          <div class="rainbow" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+          <button id="shutter" class="shutter" type="button" aria-label="Take photo"><span></span></button>
+        </div>
+      </div>
+      <div class="cam-controls">
+        <button class="ctl" id="ctlTimer" type="button">TIMER<b>OFF</b></button>
+        <button class="ctl" id="ctlStrip" type="button">STRIP<b>OFF</b></button>
+        <button class="ctl" id="ctlDx"    type="button">DOUBLE<b>OFF</b></button>
+        <button class="ctl" id="ctlZoom"  type="button">ZOOM<b>1x</b></button>
+        <button class="ctl" id="ctlFlip"  type="button">FLIP<b>CAM</b></button>
+        <button class="ctl" id="ctlSrc"   type="button">FEED<b>DEMO</b></button>
+        <button class="ctl" id="ctlScene" type="button">SCENE<b>DUSK</b></button>
+      </div>
+      <div class="cam-grip"><span>SHOEBOX 600</span></div>
+    </div>
+  </div>
+
+  <div id="flash" aria-hidden="true"></div>
+  <div id="toast" role="status"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
