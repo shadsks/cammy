@@ -48,8 +48,7 @@ without) granting webcam access.
 ## Output
 
 - Hover a photo: **png** (HD card), **gif** (wigglegrams and flipbooks animate;
-  singles export their develop-in as a looping GIF), **qr** (beam a small copy
-  to your phone, no server), **toss**.
+  singles export their develop-in as a looping GIF), **toss**.
 - **Studio** menu: save the whole wall as one PNG, build a foldable 8-photo
   mini-zine PDF with cut and fold guides, or compose a 12-photo poster PNG.
 
@@ -63,6 +62,5 @@ without) granting webcam access.
 ## Notes
 
 - Sounds (shutter, motor, beeps) are synthesized with the Web Audio API.
-- GIF encoder and PDF builder are hand-rolled and dependency-free; the only
-  external script is the QR encoder, cached for offline use.
+- GIF encoder and PDF builder are hand-rolled and dependency-free.
 - Honors `prefers-reduced-motion`.

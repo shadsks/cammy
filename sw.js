@@ -1,5 +1,5 @@
 /* SHOEBOX service worker: cache-first so the camera works fully offline. */
-const CACHE = 'shoebox-v2';
+const CACHE = 'shoebox-v3';
 const CORE = [
   './', 'index.html', 'style.css', 'app.js', 'gif.js',
   'manifest.webmanifest', 'icon.svg',
@@ -17,7 +17,7 @@ self.addEventListener('activate', e => {
   );
 });
 
-/* cache-first; runtime-cache successful fetches (fonts + qr lib included) */
+/* cache-first; runtime-cache successful fetches (fonts included) */
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
   e.respondWith(

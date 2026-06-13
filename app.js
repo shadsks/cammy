@@ -1,6 +1,6 @@
 /* SHOEBOX - instant camera. 100% client-side.
    Sections: state / film + lenses / audio / scenes / capture pipeline /
-   cards + drag / flows / webcam / meter / exports (png, gif, qr, zine, poster) /
+   cards + drag / flows / webcam / meter / exports (png, gif, zine, poster) /
    ui / pwa + tilt / boot */
 'use strict';
 
@@ -677,7 +677,6 @@ function createCard({ canvases, type = 'single', frame = state.frame, caption = 
   };
   mkBtn('png', () => exportCard(data));
   if (singleLayout) mkBtn('gif', () => exportGifCard(data));
-  if (type === 'single') mkBtn('qr', () => qrBeam(data));
   mkBtn('toss', () => removeCard(el, data));
   el.append(tools);
 
@@ -1255,37 +1254,6 @@ async function exportGifCard(d) {
   toast('GIF saved.');
 }
 
-/* qr beam */
-function qrBeam(d) {
-  if (typeof qrcode === 'undefined') {
-    toast('QR needs one online visit to load. Try again later.');
-    return;
-  }
-  let dataUrl = '';
-  for (const [s, q] of [[110, .62], [96, .55], [80, .5], [64, .45]]) {
-    const c = mkCanvas(s, s);
-    c.getContext('2d').drawImage(d.negative ? negCanvas(d) : d.canvases[0], 0, 0, s, s);
-    dataUrl = c.toDataURL('image/jpeg', q);
-    if (dataUrl.length <= 2700) break;
-  }
-  try {
-    const qr = qrcode(0, 'L');
-    qr.addData(dataUrl, 'Byte');
-    qr.make();
-    const n = qr.getModuleCount();
-    const Q = 528, u = Q / (n + 8);
-    const cv = $('#qrCanvas');
-    cv.width = cv.height = Q;
-    const x = cv.getContext('2d');
-    x.fillStyle = '#fff'; x.fillRect(0, 0, Q, Q);
-    x.fillStyle = '#1c1916';
-    for (let r = 0; r < n; r++)
-      for (let cI = 0; cI < n; cI++)
-        if (qr.isDark(r, cI)) x.fillRect((cI + 4) * u, (r + 4) * u, u + .5, u + .5);
-    $('#qrModal').hidden = false;
-  } catch { toast('That photo is too detailed for a QR. Try again.'); }
-}
-
 /* wall, zine, poster */
 function paintSurface(x, W, H) {
   if (state.surface === 'cork') {
@@ -1691,9 +1659,6 @@ function bindControls() {
     $('#btnSound').textContent = 'Sound: ' + (state.sound ? 'on' : 'off');
     $('#btnSound').setAttribute('aria-pressed', state.sound);
   });
-
-  $('#qrClose').addEventListener('click', () => { $('#qrModal').hidden = true; });
-  $('#qrModal').addEventListener('click', e => { if (e.target.id === 'qrModal') $('#qrModal').hidden = true; });
 
   document.addEventListener('keydown', e => {
     if (e.code !== 'Space' || e.repeat) return;
