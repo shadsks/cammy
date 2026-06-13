@@ -35,7 +35,7 @@ const state = {
   motion: [],          // stop-motion frames (baked)
   timer: 0, zoom: 1,
   stripLayout: 'strip',
-  lab: { spatial: true, shader: true, lens: true, sound: true },
+  lab: { shader: true, lens: true, sound: true },
   sound: true, haptics: true, luma: .5,
 };
 let busy = false, exposureActive = false, trayCard = null, stream = null;
@@ -812,18 +812,45 @@ function createCard({ canvases, type = 'single', frame = state.frame, caption = 
   const tools = document.createElement('div');
   tools.className = 'tools';
   tools.addEventListener('pointerdown', e => e.stopPropagation());
-  const mkBtn = (label, fn) => {
+
+  // one "Save" control that opens a format menu (PNG / GIF / MP4)
+  const saveWrap = document.createElement('div');
+  saveWrap.className = 'save-wrap';
+  const saveBtn = document.createElement('button');
+  saveBtn.type = 'button'; saveBtn.className = 'save-btn'; saveBtn.textContent = 'save ▾';
+  const menu = document.createElement('div');
+  menu.className = 'save-menu'; menu.hidden = true;
+  let closeListener = null;
+  const closeMenu = () => {
+    menu.hidden = true; el.classList.remove('saving');
+    if (closeListener) { document.removeEventListener('pointerdown', closeListener, true); closeListener = null; }
+  };
+  const addFmt = (label, fn) => {
     const b = document.createElement('button');
     b.type = 'button'; b.textContent = label;
-    b.addEventListener('click', () => { sndLab('tool'); fn(); });
-    tools.append(b);
+    b.addEventListener('click', () => { closeMenu(); sndLab('tool'); fn(); });
+    menu.append(b);
   };
-  mkBtn('png', () => exportCard(data));
+  addFmt('PNG', () => exportCard(data));
   if (singleLayout) {
-    mkBtn('gif', () => exportGifCard(data));
-    mkBtn('mp4', () => exportVideoCard(data));
+    addFmt('GIF', () => exportGifCard(data));
+    addFmt('MP4', () => exportVideoCard(data));
   }
-  mkBtn('toss', () => removeCard(el, data));
+  saveBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    if (menu.hidden) {
+      menu.hidden = false; el.classList.add('saving'); sndLab('tap');
+      closeListener = ev => { if (!saveWrap.contains(ev.target)) closeMenu(); };
+      setTimeout(() => document.addEventListener('pointerdown', closeListener, true), 0);
+    } else closeMenu();
+  });
+  saveWrap.append(saveBtn, menu);
+  tools.append(saveWrap);
+
+  const tossBtn = document.createElement('button');
+  tossBtn.type = 'button'; tossBtn.textContent = 'toss';
+  tossBtn.addEventListener('click', () => { sndLab('tool'); removeCard(el, data); });
+  tools.append(tossBtn);
   el.append(tools);
 
   // voice playback: hover on desktop, press-and-hold on touch
@@ -884,36 +911,32 @@ function buildCardBack(el, data) {
   });
   back.append(note);
 
+  // place: a tidy single line — map thumbnail + coordinates, shown only once tagged
   const place = document.createElement('div');
   place.className = 'cb-place';
+  place.hidden = !data.place;
   const map = document.createElement('canvas');
-  map.className = 'cb-map'; map.width = 46; map.height = 46; map.hidden = !data.coords;
+  map.className = 'cb-map'; map.width = 44; map.height = 44; map.hidden = !data.coords;
   if (data.coords) drawMapDoodle(map, data.coords);
   const placeText = document.createElement('span');
   placeText.className = 'cb-place-text handwritten';
   placeText.textContent = data.place || '';
+  place.append(map, placeText);
+  back.append(place);
+
+  // footer: two evenly sized actions
+  const foot = document.createElement('div');
+  foot.className = 'cb-foot';
   const tag = document.createElement('button');
   tag.type = 'button'; tag.className = 'cb-btn';
   tag.textContent = data.place ? 'place ✓' : 'tag place';
   tag.addEventListener('pointerdown', stop);
-  tag.addEventListener('click', () => tagPlace(data, placeText, map, tag));
-  place.append(map, placeText, tag);
-  back.append(place);
-
-  const foot = document.createElement('div');
-  foot.className = 'cb-foot';
+  tag.addEventListener('click', () => tagPlace(data, placeText, map, tag, place));
   const flip = document.createElement('button');
   flip.type = 'button'; flip.className = 'cb-btn'; flip.textContent = 'flip ↩';
   flip.addEventListener('pointerdown', stop);
   flip.addEventListener('click', () => toggleFlip(el, data, false));
-  foot.append(flip);
-  if (state.lab.spatial) {
-    const d3 = document.createElement('button');
-    d3.type = 'button'; d3.className = 'cb-btn'; d3.textContent = 'see in 3D';
-    d3.addEventListener('pointerdown', stop);
-    d3.addEventListener('click', () => { labEvent('depth', { image: labPreviewURL(data, 360) }); toast('Tilting it into a paper relief.'); });
-    foot.append(d3);
-  }
+  foot.append(tag, flip);
   back.append(foot);
   return back;
 }
@@ -925,7 +948,7 @@ function toggleFlip(el, data, force) {
 
 /* location is opt-in and never leaves the device: coordinates become an
    offline procedural "map doodle", not a request to any tile server. */
-function tagPlace(data, textEl, mapEl, btn) {
+function tagPlace(data, textEl, mapEl, btn, rowEl) {
   if (!navigator.geolocation) { toast('No location available on this device.'); return; }
   btn.textContent = 'locating…';
   navigator.geolocation.getCurrentPosition(pos => {
@@ -934,6 +957,7 @@ function tagPlace(data, textEl, mapEl, btn) {
     data.place = `${la.toFixed(3)}°, ${lo.toFixed(3)}°`;
     textEl.textContent = data.place;
     mapEl.hidden = false;
+    if (rowEl) rowEl.hidden = false;
     drawMapDoodle(mapEl, data.coords);
     btn.textContent = 'place ✓';
   }, () => { btn.textContent = 'tag place'; toast('Location permission denied.'); },
@@ -1265,7 +1289,7 @@ function flash() {
 }
 function pulseFlashBeam() {
   const beam = $('#flashBeam');
-  if (!beam || !state.lab.spatial) return;
+  if (!beam) return;
   beam.innerHTML = '';
   const count = matchMedia('(prefers-reduced-motion: reduce)').matches ? 10 : 26;
   for (let i = 0; i < count; i++) {
@@ -1561,7 +1585,6 @@ function sampleMeter() {
     for (let i = 0; i < d.length; i += 4) sum += d[i] * .299 + d[i + 1] * .587 + d[i + 2] * .114;
     const luma = sum / (64 * 255);
     state.luma = state.luma * .6 + luma * .4;
-    $('#meterNeedle').style.setProperty('--ang', (-40 + state.luma * 80).toFixed(1) + 'deg');
   } catch { /* canvas not ready */ }
 }
 
@@ -1841,7 +1864,7 @@ async function exportZine(customPicks) {
   const picks = (customPicks && customPicks.length >= 8) ? customPicks.slice(0, 8) : latestCards(8);
   if (picks.length < 8) { toast(`A zine needs 8 photos. ${8 - picks.length} more to go.`); return; }
   await document.fonts.ready;
-  if (state.lab.spatial) playZineFold(picks);
+  playZineFold(picks);
   toast('Folding the zine...');
   await sleep(30);
   const W = 2480, H = 1754, pw = W / 4, phh = H / 2;
@@ -2031,22 +2054,10 @@ function syncStockTheme() {
   document.body.style.setProperty('--stock-c', theme[2]);
 }
 function syncLab() {
-  document.body.classList.toggle('lab-spatial', state.lab.spatial);
+  // shader, glass (lens), and soundboard stay on in full; spatial is gone
   document.body.classList.toggle('lab-shader', state.lab.shader);
   document.body.classList.toggle('lab-lens', state.lab.lens);
   document.body.classList.toggle('lab-soundboard', state.lab.sound);
-  const map = {
-    labSpatial: 'spatial',
-    labShader: 'shader',
-    labLens: 'lens',
-    labSound: 'sound',
-  };
-  for (const [id, key] of Object.entries(map)) {
-    const input = $('#' + id);
-    if (input) input.checked = !!state.lab[key];
-  }
-  $('#btnLab')?.setAttribute('aria-pressed', String(Object.values(state.lab).some(Boolean)));
-  labEvent('settings', { lab: { ...state.lab }, lens: state.lens, stock: state.stock });
 }
 function updateStudioCounts() {
   const n = cardData.size;
@@ -2152,7 +2163,7 @@ function buildSheet(filter = 'all') {
 }
 function openSheet() {
   if (!cardData.size) { toast('Nothing to show yet.'); return; }
-  $('#darkroom').hidden = $('#studio').hidden = $('#labPanel').hidden = true;
+  $('#darkroom').hidden = $('#studio').hidden = true;
   sheetSel.clear();
   buildSheet('all');
   const s = $('#sheet'); s.hidden = false;
@@ -2264,20 +2275,13 @@ function bindControls() {
 
   $('#btnDarkroom').addEventListener('click', () => {
     $('#studio').hidden = true;
-    $('#labPanel').hidden = true;
     $('#darkroom').hidden = !$('#darkroom').hidden;
   });
   $('#btnStudio').addEventListener('click', () => {
     $('#darkroom').hidden = true;
-    $('#labPanel').hidden = true;
     const st = $('#studio');
     st.hidden = !st.hidden;
     if (!st.hidden) updateStudioCounts();
-  });
-  $('#btnLab').addEventListener('click', () => {
-    $('#darkroom').hidden = true;
-    $('#studio').hidden = true;
-    $('#labPanel').hidden = !$('#labPanel').hidden;
   });
   $('#stWall').addEventListener('click', () => exportWall());
   $('#stFold').addEventListener('click', () => playZineFold());
@@ -2296,13 +2300,6 @@ function bindControls() {
     if (p.length && p.length < 12) { toast(`Select 12 for a poster (${p.length} chosen).`); return; }
     closeSheet(); exportPoster(p.length ? p : null);
   });
-  for (const [id, key] of [['#labSpatial', 'spatial'], ['#labShader', 'shader'], ['#labLens', 'lens'], ['#labSound', 'sound']]) {
-    const input = $(id);
-    input.addEventListener('change', () => {
-      state.lab[key] = input.checked;
-      syncLab();
-    });
-  }
 
   $('#btnClear').addEventListener('click', () => {
     if (!wall.children.length && !trayCard) return;

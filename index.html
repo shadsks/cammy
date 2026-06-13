@@ -7,26 +7,15 @@
 <meta name="theme-color" content="#1c1916">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
-<script type="importmap">
-{
-  "imports": {
-    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
-  }
-}
-</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600&family=Space+Grotesk:wght@400;500;600;700&family=VT323&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=lab7">
-<link rel="stylesheet" href="shoebox-lab.css?v=lab7">
+<link rel="stylesheet" href="style.css?v=lab8">
+<link rel="stylesheet" href="shoebox-lab.css?v=lab8">
 </head>
 <body class="bg-cork demo">
 
   <!-- the desk / photo wall -->
-  <div id="spatialLab" class="spatial-lab" aria-hidden="true">
-    <canvas id="spatialCanvas"></canvas>
-  </div>
   <div id="wall" aria-label="Photo wall"></div>
   <div class="wall-shade" aria-hidden="true"></div>
   <div class="wall-grain" aria-hidden="true"></div>
@@ -40,7 +29,6 @@
   <nav class="topbar">
     <button id="btnDarkroom" type="button">Darkroom</button>
     <button id="btnStudio" type="button">Studio</button>
-    <button id="btnLab" type="button" aria-pressed="true">Lab</button>
     <button id="btnSheet" type="button">Sheet</button>
     <button id="btnClear" type="button">Clear</button>
     <button id="btnSound" type="button" aria-pressed="true">Sound: on</button>
@@ -99,34 +87,11 @@
     </div>
   </aside>
 
-  <aside id="labPanel" class="panel lab-panel" hidden>
-    <h2>Lab</h2>
-    <div class="lab-switches">
-      <label title="3D paper curl, eject mirror, lens glass, and desk particles">
-        <input id="labSpatial" type="checkbox" checked>
-        <span><strong>Spatial</strong><em>3D desk</em></span>
-      </label>
-      <label title="Halation, chromatic smear, grain, and gate weave">
-        <input id="labShader" type="checkbox" checked>
-        <span><strong>Shader</strong><em>film pass</em></span>
-      </label>
-      <label title="Interactive fisheye, prism, and split lens objects">
-        <input id="labLens" type="checkbox" checked>
-        <span><strong>Glass</strong><em>lens lab</em></span>
-      </label>
-      <label title="Mechanical identities for controls and camera actions">
-        <input id="labSound" type="checkbox" checked>
-        <span><strong>Soundboard</strong><em>mechanics</em></span>
-      </label>
-    </div>
-  </aside>
-
   <!-- the camera -->
   <div id="camera" data-lens="normal">
     <div id="ejector"></div>
     <div class="cam-shell">
       <div class="cam-top">
-        <div class="meter" title="Light meter"><i id="meterNeedle"></i></div>
         <div class="slot"></div>
       </div>
       <div class="cam-face">
@@ -205,9 +170,8 @@
   <div id="flash" aria-hidden="true"></div>
   <div id="toast" role="status"></div>
 
-  <script src="gif.js?v=lab7"></script>
-  <script src="mp4.js?v=lab7"></script>
-  <script src="app.js?v=lab7"></script>
-  <script type="module" src="three-lab.js?v=lab7"></script>
+  <script src="gif.js?v=lab8"></script>
+  <script src="mp4.js?v=lab8"></script>
+  <script src="app.js?v=lab8"></script>
 </body>
 </html>

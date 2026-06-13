@@ -11,21 +11,6 @@
     linear-gradient(0deg, rgba(70,45,20,.028) 1px, transparent 1px);
 }
 
-.spatial-lab{
-  position:fixed;
-  inset:0;
-  z-index:6;
-  pointer-events:none;
-  opacity:.9;
-  mix-blend-mode:normal;
-}
-.spatial-lab canvas{
-  width:100%;
-  height:100%;
-  display:block;
-}
-body:not(.lab-spatial) .spatial-lab{display:none}
-
 .flash-beam{
   position:fixed;
   inset:0;
@@ -59,70 +44,6 @@ body:not(.lab-spatial) .spatial-lab{display:none}
   from{opacity:0; transform:translate3d(-16px,18px,0) scale(calc(var(--s) * .55))}
   25%{opacity:.9}
   to{opacity:0; transform:translate3d(28px,-22px,0) scale(var(--s))}
-}
-
-.lab-panel{width:278px}
-.lab-switches{
-  display:grid;
-  grid-template-columns:1fr 1fr;
-  gap:8px;
-  margin-top:12px;
-}
-.lab-switches label{
-  position:relative;
-  min-height:66px;
-  border:1px solid rgba(255,250,240,.12);
-  border-radius:var(--lab-radius);
-  background:
-    linear-gradient(180deg, rgba(255,250,240,.08), rgba(255,250,240,.035)),
-    rgba(16,13,10,.22);
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.08), 0 6px 18px rgba(10,5,2,.22);
-  cursor:pointer;
-  overflow:hidden;
-}
-.lab-switches label::before{
-  content:"";
-  position:absolute;
-  inset:0;
-  opacity:.38;
-  background:linear-gradient(135deg, var(--stock-a), transparent 38%, var(--stock-b));
-  mix-blend-mode:screen;
-}
-.lab-switches input{
-  position:absolute;
-  opacity:0;
-}
-.lab-switches span{
-  position:relative;
-  z-index:1;
-  height:100%;
-  display:flex;
-  flex-direction:column;
-  justify-content:flex-end;
-  gap:2px;
-  padding:10px;
-}
-.lab-switches strong{
-  color:#f5efe4;
-  font:700 11px/1 "Space Grotesk",sans-serif;
-  letter-spacing:.14em;
-  text-transform:uppercase;
-}
-.lab-switches em{
-  color:#b9b09e;
-  font:500 10px/1 "Space Grotesk",sans-serif;
-  font-style:normal;
-}
-.lab-switches label:has(input:checked){
-  border-color:color-mix(in srgb, var(--stock-a) 72%, white 6%);
-  box-shadow:
-    inset 0 1px 0 rgba(255,255,255,.14),
-    0 0 0 1px rgba(255,255,255,.04),
-    0 10px 24px rgba(10,5,2,.32);
-}
-.lab-switches label:has(input:focus-visible){
-  outline:2px solid var(--stock-a);
-  outline-offset:2px;
 }
 
 /* Tailwind-style reusable primitives for future Shoebox surfaces. */
@@ -181,7 +102,6 @@ button.wide:active,
     inset 0 -2px 4px rgba(140,110,70,.22),
     0 0 0 1px rgba(255,255,255,.2);
 }
-.meter,
 .slot,
 .lens-tag{
   letter-spacing:.18em;
@@ -399,7 +319,6 @@ body:not(.lab-lens) .lens-mini{display:none}
 
 /* ---- app-state variants: keyed off body classes the app already toggles ---- */
 body.golden-now .brand h1{text-shadow:0 2px 16px rgba(255,170,80,.55)}
-body.golden-now .meter::before{opacity:.92}
 body[data-transport="exposing"] .vf-ring{
   box-shadow:0 0 0 2px color-mix(in srgb, var(--stock-a) 55%, transparent),
     0 12px 24px rgba(20,12,4,.38), inset 0 1px 2px rgba(255,255,255,.55);
@@ -427,7 +346,7 @@ body[data-transport="ejecting"] .slot{
   .sheet,#sheet,.disintegrate{display:none !important}
   .card-inner{transform:none !important}
   .card-back{display:none !important}
-  .topbar,.panel,#camera,#lightbox,#toast,#flash,.spatial-lab,.flash-beam,.zine-fold{
+  .topbar,.panel,#camera,#lightbox,#toast,#flash,.flash-beam,.zine-fold,.sheet{
     display:none !important;
   }
   #wall{
@@ -441,8 +360,7 @@ body[data-transport="ejecting"] .slot{
 }
 
 @media (prefers-reduced-motion: reduce){
-  .flash-beam,
-  .spatial-lab{opacity:.35}
+  .flash-beam{opacity:.35}
   .flash-beam i,
   .vf-shader,
   .zine-fold.play .zine-book,
@@ -462,11 +380,5 @@ body[data-transport="ejecting"] .slot{
 }
 
 @media (max-width:640px){
-  .lab-panel{width:auto}
-  .lab-switches{grid-template-columns:repeat(4,minmax(0,1fr))}
-  .lab-switches label{min-height:58px}
-  .lab-switches span{padding:8px 6px}
-  .lab-switches strong{font-size:9px; letter-spacing:.08em}
-  .lab-switches em{display:none}
   .zine-book{width:86vw}
 }

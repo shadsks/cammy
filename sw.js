@@ -1,7 +1,7 @@
 /* SHOEBOX service worker: cache-first so the camera works fully offline. */
-const CACHE = 'shoebox-v7';
+const CACHE = 'shoebox-v8';
 const CORE = [
-  './', 'index.html', 'style.css', 'shoebox-lab.css', 'app.js', 'three-lab.js', 'gif.js', 'mp4.js',
+  './', 'index.html', 'style.css', 'shoebox-lab.css', 'app.js', 'gif.js', 'mp4.js',
   'manifest.webmanifest', 'icon.svg', 'shoebox-lab.tailwind.js',
 ];
 
