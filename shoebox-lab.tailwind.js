@@ -42,6 +42,29 @@ module.exports = {
       transitionTimingFunction: {
         lab: 'cubic-bezier(.2,.72,.18,1)',
       },
+      containers: {
+        card: '12rem',
+      },
     },
   },
+  plugins: [
+    /* Analog utilities + app-state variants, mirroring shoebox-lab.css so any
+       future Tailwind surface shares the vanilla app's vocabulary. */
+    function ({ addUtilities, addVariant }) {
+      addUtilities({
+        '.fx-grain': { position: 'relative' },
+        '.fx-vignette-sm': { boxShadow: 'inset 0 0 30px rgb(18 7 2 / .5)' },
+        '.fx-vignette-lg': { boxShadow: 'inset 0 0 60px rgb(18 7 2 / .82)' },
+        '.fx-halation': { filter: 'saturate(1.1) brightness(1.03)' },
+        '.fx-paper-curl': { boxShadow: '0 12px 22px -8px rgb(12 7 3 / .5)', borderRadius: '4px' },
+      });
+      // e.g. golden-hour:ring-film-golden, busy:opacity-50, ejecting:animate-pulse
+      addVariant('golden-hour', 'body.golden-now &');
+      addVariant('busy', 'body.busy &');
+      addVariant('live', 'body.live &');
+      addVariant('lab-spatial', 'body.lab-spatial &');
+      addVariant('exposing', 'body[data-transport="exposing"] &');
+      addVariant('ejecting', 'body[data-transport="ejecting"] &');
+    },
+  ],
 };

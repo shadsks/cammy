@@ -7,11 +7,19 @@
 <meta name="theme-color" content="#1c1916">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600&family=Space+Grotesk:wght@400;500;600;700&family=VT323&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=lab6">
-<link rel="stylesheet" href="shoebox-lab.css?v=lab6">
+<link rel="stylesheet" href="style.css?v=lab7">
+<link rel="stylesheet" href="shoebox-lab.css?v=lab7">
 </head>
 <body class="bg-cork demo">
 
@@ -33,6 +41,7 @@
     <button id="btnDarkroom" type="button">Darkroom</button>
     <button id="btnStudio" type="button">Studio</button>
     <button id="btnLab" type="button" aria-pressed="true">Lab</button>
+    <button id="btnSheet" type="button">Sheet</button>
     <button id="btnClear" type="button">Clear</button>
     <button id="btnSound" type="button" aria-pressed="true">Sound: on</button>
   </nav>
@@ -76,6 +85,7 @@
     <section id="deskSec" hidden>
       <h3>Desk</h3>
       <button id="tiltBtn" class="wide" type="button">Tilt drift: off</button>
+      <button id="ambientBtn" class="wide" type="button" hidden>Room light: off</button>
     </section>
   </aside>
 
@@ -167,6 +177,22 @@
     </div>
   </div>
 
+  <div id="sheet" class="sheet" hidden>
+    <div class="sheet-bar">
+      <h2>Contact sheet</h2>
+      <div class="sheet-filters" id="sheetFilters"></div>
+      <button id="sheetClose" class="sheet-x" type="button" aria-label="Close contact sheet">✕</button>
+    </div>
+    <div class="sheet-grid" id="sheetGrid"></div>
+    <div class="sheet-foot">
+      <span id="sheetCount">tap photos to select</span>
+      <div class="sheet-actions">
+        <button id="sheetZine" type="button">Zine from selection</button>
+        <button id="sheetPoster" type="button">Poster from selection</button>
+      </div>
+    </div>
+  </div>
+
   <div id="lightbox" hidden><span>LIGHTBOX</span></div>
 
   <div id="zineFold" class="zine-fold" hidden aria-hidden="true">
@@ -179,8 +205,9 @@
   <div id="flash" aria-hidden="true"></div>
   <div id="toast" role="status"></div>
 
-  <script src="gif.js?v=lab6"></script>
-  <script src="app.js?v=lab6"></script>
-  <script type="module" src="three-lab.js?v=lab6"></script>
+  <script src="gif.js?v=lab7"></script>
+  <script src="mp4.js?v=lab7"></script>
+  <script src="app.js?v=lab7"></script>
+  <script type="module" src="three-lab.js?v=lab7"></script>
 </body>
 </html>

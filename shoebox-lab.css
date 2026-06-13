@@ -382,12 +382,51 @@ body:not(.lab-lens) .lens-mini{display:none}
   82%,100%{transform:rotateX(178deg)}
 }
 
+/* ---- analog utilities: composable film-look classes.
+   The Tailwind preset documents these as a plugin for future surfaces. ---- */
+.fx-grain{position:relative}
+.fx-grain::after{content:""; position:absolute; inset:0; pointer-events:none;
+  background-image:var(--noise); background-size:130px; mix-blend-mode:overlay; opacity:.5}
+.fx-vignette-sm{box-shadow:inset 0 0 30px rgba(18,7,2,.5)}
+.fx-vignette-lg{box-shadow:inset 0 0 60px rgba(18,7,2,.82)}
+.fx-halation{filter:saturate(1.1) brightness(1.03)}
+.fx-leak{position:relative; overflow:hidden}
+.fx-leak::before{content:""; position:absolute; inset:0; pointer-events:none; mix-blend-mode:screen;
+  background:radial-gradient(48% 42% at 88% 6%, rgba(255,108,42,.7), transparent 70%)}
+.fx-paper-curl{box-shadow:0 12px 22px -8px rgba(12,7,3,.5); border-radius:4px}
+.fx-developing{animation:fxDevelop 1.4s ease-out both}
+@keyframes fxDevelop{from{filter:blur(8px) brightness(.2) saturate(.1)} to{filter:none}}
+
+/* ---- app-state variants: keyed off body classes the app already toggles ---- */
+body.golden-now .brand h1{text-shadow:0 2px 16px rgba(255,170,80,.55)}
+body.golden-now .meter::before{opacity:.92}
+body[data-transport="exposing"] .vf-ring{
+  box-shadow:0 0 0 2px color-mix(in srgb, var(--stock-a) 55%, transparent),
+    0 12px 24px rgba(20,12,4,.38), inset 0 1px 2px rgba(255,255,255,.55);
+}
+body[data-transport="ejecting"] .slot{
+  box-shadow:inset 0 2px 3px rgba(0,0,0,.95), 0 0 12px rgba(255,160,80,.55);
+}
+
+/* ---- entrance transitions (progressive; ignored where @starting-style is unsupported) ---- */
+.panel{transition:opacity .2s var(--lab-ease), transform .2s var(--lab-ease)}
+@starting-style{
+  .panel:not([hidden]){opacity:0; transform:translateY(-10px)}
+  .sheet.open{opacity:0}
+  .card-back{opacity:0}
+}
+
+@page{ margin:10mm; }
 @media print{
   body{
     overflow:visible;
     background:#fff !important;
     color:#1c1916;
   }
+  /* the desk prints as a clean sheet of photos */
+  .sheet,#sheet,.disintegrate{display:none !important}
+  .card-inner{transform:none !important}
+  .card-back{display:none !important}
   .topbar,.panel,#camera,#lightbox,#toast,#flash,.spatial-lab,.flash-beam,.zine-fold{
     display:none !important;
   }

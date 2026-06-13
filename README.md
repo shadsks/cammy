@@ -48,9 +48,21 @@ without) granting webcam access.
 ## Output
 
 - Hover a photo: **png** (HD card), **gif** (wigglegrams and flipbooks animate;
-  singles export their develop-in as a looping GIF), **toss**.
+  singles export their develop-in as a looping GIF), **mp4** (H.264 via WebCodecs,
+  with a WebM fallback), **toss** (the print bursts into a cloud of its own pixels).
 - **Studio** menu: save the whole wall as one PNG, build a foldable 8-photo
   mini-zine PDF with cut and fold guides, or compose a 12-photo poster PNG.
+- **Sheet** (topbar): a contact sheet of every photo, filterable by film stock.
+  Select photos and send the selection straight to a zine or poster.
+
+## On the desk
+
+- **Flip a photo** (double-click, or double-tap on touch) to see its back: a
+  ruled note you can write on, a "developed on" stamp, and an optional place tag.
+  Location is opt-in and never leaves the device - coordinates become an offline
+  procedural map doodle, not a request to any tile server.
+- **Drag one photo onto another** to sandwich them into a new double exposure.
+- Photos throw with momentum when you flick them.
 
 ## Mobile
 
@@ -58,6 +70,20 @@ without) granting webcam access.
 - Thumb-shot layout: the camera docks bottom-center on phones.
 - Tilt drift (Darkroom, on devices with a gyroscope): tilting the phone makes
   the photos drift subtly on the desk.
+
+## Lab (optional, all off-by-default friendly)
+
+- **Spatial** adds a Three.js desk: the ejected photo develops through a real
+  GLSL shader as it flies, the flash throws a volumetric god-ray cone through
+  drifting dust, and "see in 3D" (on a photo's back) lifts it into a tiltable
+  luminance relief. **Shader** adds a film post-processing pass (grain + vignette,
+  coverage-weighted so the page behind stays clean). All of it fails silently to
+  the plain app if WebGL or the CDN modules are unavailable.
+- **Haptics**: shutter and eject give a short buzz on supported devices (shares
+  the Soundboard's "mechanics" switch and respects reduced-motion).
+- **Room light** (Darkroom, where the ambient-light sensor exists): the real
+  light in your room drives the live light-leak intensity.
+- The EXPO / TIMER / ZOOM controls are also dials - drag them up or down.
 
 ## Notes
 

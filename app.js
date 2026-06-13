@@ -36,7 +36,7 @@ const state = {
   timer: 0, zoom: 1,
   stripLayout: 'strip',
   lab: { spatial: true, shader: true, lens: true, sound: true },
-  sound: true, luma: .5,
+  sound: true, haptics: true, luma: .5,
 };
 let busy = false, exposureActive = false, trayCard = null, stream = null;
 let zTop = 10, uid = 0;
@@ -45,6 +45,35 @@ const hinted = new Set();
 
 function labEvent(type, detail = {}) {
   window.dispatchEvent(new CustomEvent('shoebox:' + type, { detail }));
+}
+
+/* ---------------- camera transport (explicit state machine) ----------------
+   Replaces a tangle of implicit booleans with one named state. Capture flows
+   ask transport.enter('exposing') and impossible transitions are refused, so
+   "shoot while a frame is still ejecting" simply cannot happen. */
+const transport = {
+  state: 'ready',                          // ready | exposing | ejecting
+  allowed: {
+    ready: ['exposing', 'ejecting'],
+    exposing: ['ejecting', 'ready'],
+    ejecting: ['ready'],
+  },
+  can(next) { return this.allowed[this.state].includes(next); },
+  enter(next) {
+    if (this.state === next) return true;
+    if (!this.can(next)) return false;
+    this.state = next;
+    document.body.dataset.transport = next;
+    labEvent('transport', { state: next });
+    return true;
+  },
+};
+
+/* gentle mechanical haptics; rides the same "mechanics" identity as sound */
+function haptic(pattern) {
+  if (!state.haptics || !state.lab.sound) return;
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  navigator.vibrate?.(pattern);
 }
 
 /* ---------------- film stocks ---------------- */
@@ -688,10 +717,12 @@ function fmtDate(d) {
 }
 
 function createCard({ canvases, type = 'single', frame = state.frame, caption = '', audio: audioBlob = null, negative = false }) {
+  const now = new Date();
   const data = {
     id: ++uid, type, frame, canvases, caption, negative,
     stock: state.stock,
-    date: fmtDate(new Date()), rot: rnd(-2.5, 2.5),
+    date: fmtDate(now), born: now, note: '', place: '',
+    rot: rnd(-2.5, 2.5),
     audioURL: audioBlob ? URL.createObjectURL(audioBlob) : null,
   };
   cardData.set(data.id, data);
@@ -733,7 +764,9 @@ function createCard({ canvases, type = 'single', frame = state.frame, caption = 
       v.className = 'voice-chip'; v.textContent = 'VOICE';
       f.append(v);
     }
-    el.append(f);
+    const face = document.createElement('div');
+    face.className = 'card-face';
+    face.append(f);
     const cap = document.createElement('div');
     cap.className = 'caption';
     cap.contentEditable = 'plaintext-only';
@@ -746,7 +779,12 @@ function createCard({ canvases, type = 'single', frame = state.frame, caption = 
       if (cap.textContent.length > 32) cap.textContent = cap.textContent.slice(0, 32);
       data.caption = cap.textContent.trim();
     });
-    el.append(cap);
+    face.append(cap);
+    const inner = document.createElement('div');
+    inner.className = 'card-inner';
+    inner.append(face, buildCardBack(el, data));
+    el.append(inner);
+    el.classList.add('flippable');
   } else {
     const holder = type === 'grid' ? document.createElement('div') : el;
     if (type === 'grid') { holder.className = 'phs'; el.append(holder); }
@@ -781,7 +819,10 @@ function createCard({ canvases, type = 'single', frame = state.frame, caption = 
     tools.append(b);
   };
   mkBtn('png', () => exportCard(data));
-  if (singleLayout) mkBtn('gif', () => exportGifCard(data));
+  if (singleLayout) {
+    mkBtn('gif', () => exportGifCard(data));
+    mkBtn('mp4', () => exportVideoCard(data));
+  }
   mkBtn('toss', () => removeCard(el, data));
   el.append(tools);
 
@@ -810,54 +851,275 @@ function startLively(el, d) {
   }, d.type === 'wiggle' ? 95 : 115);
 }
 
-function removeCard(el, data) {
-  if (trayCard === el) trayCard = null;
-  if (data._timer) clearInterval(data._timer);
-  if (data.audioURL) URL.revokeObjectURL(data.audioURL);
-  cardData.delete(data.id);
-  el.remove();
+/* ---- the back of the photo: ruled note, develop stamp, place scrawl ---- */
+function fmtBack(d) {
+  const p = n => String(n).padStart(2, '0');
+  return `${fmtDate(d)} · ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+function buildCardBack(el, data) {
+  const back = document.createElement('div');
+  back.className = 'card-back';
+  const stop = e => e.stopPropagation();
+
+  const head = document.createElement('div');
+  head.className = 'cb-head';
+  head.innerHTML = `<span>SHOEBOX</span><span class="cb-no">No.${String(data.id).padStart(3, '0')}</span>`;
+  back.append(head);
+
+  const dev = document.createElement('div');
+  dev.className = 'cb-dev lab-stamp';
+  dev.textContent = 'DEVELOPED ON ' + fmtBack(data.born);
+  back.append(dev);
+
+  const note = document.createElement('div');
+  note.className = 'cb-note cb-edit handwritten';
+  note.contentEditable = 'plaintext-only';
+  note.spellcheck = false;
+  note.dataset.ph = 'a longer note on the back…';
+  note.textContent = data.note || '';
+  note.addEventListener('pointerdown', stop);
+  note.addEventListener('input', () => {
+    if (note.textContent.length > 220) note.textContent = note.textContent.slice(0, 220);
+    data.note = note.textContent;
+  });
+  back.append(note);
+
+  const place = document.createElement('div');
+  place.className = 'cb-place';
+  const map = document.createElement('canvas');
+  map.className = 'cb-map'; map.width = 46; map.height = 46; map.hidden = !data.coords;
+  if (data.coords) drawMapDoodle(map, data.coords);
+  const placeText = document.createElement('span');
+  placeText.className = 'cb-place-text handwritten';
+  placeText.textContent = data.place || '';
+  const tag = document.createElement('button');
+  tag.type = 'button'; tag.className = 'cb-btn';
+  tag.textContent = data.place ? 'place ✓' : 'tag place';
+  tag.addEventListener('pointerdown', stop);
+  tag.addEventListener('click', () => tagPlace(data, placeText, map, tag));
+  place.append(map, placeText, tag);
+  back.append(place);
+
+  const foot = document.createElement('div');
+  foot.className = 'cb-foot';
+  const flip = document.createElement('button');
+  flip.type = 'button'; flip.className = 'cb-btn'; flip.textContent = 'flip ↩';
+  flip.addEventListener('pointerdown', stop);
+  flip.addEventListener('click', () => toggleFlip(el, data, false));
+  foot.append(flip);
+  if (state.lab.spatial) {
+    const d3 = document.createElement('button');
+    d3.type = 'button'; d3.className = 'cb-btn'; d3.textContent = 'see in 3D';
+    d3.addEventListener('pointerdown', stop);
+    d3.addEventListener('click', () => { labEvent('depth', { image: labPreviewURL(data, 360) }); toast('Tilting it into a paper relief.'); });
+    foot.append(d3);
+  }
+  back.append(foot);
+  return back;
+}
+function toggleFlip(el, data, force) {
+  const next = force != null ? force : !el.classList.contains('flipped');
+  el.classList.toggle('flipped', next);
+  sndLab('toggle'); haptic(8);
+}
+
+/* location is opt-in and never leaves the device: coordinates become an
+   offline procedural "map doodle", not a request to any tile server. */
+function tagPlace(data, textEl, mapEl, btn) {
+  if (!navigator.geolocation) { toast('No location available on this device.'); return; }
+  btn.textContent = 'locating…';
+  navigator.geolocation.getCurrentPosition(pos => {
+    const { latitude: la, longitude: lo } = pos.coords;
+    data.coords = [la, lo];
+    data.place = `${la.toFixed(3)}°, ${lo.toFixed(3)}°`;
+    textEl.textContent = data.place;
+    mapEl.hidden = false;
+    drawMapDoodle(mapEl, data.coords);
+    btn.textContent = 'place ✓';
+  }, () => { btn.textContent = 'tag place'; toast('Location permission denied.'); },
+    { enableHighAccuracy: false, timeout: 8000 });
+}
+function drawMapDoodle(cv, [la, lo]) {
+  const x = cv.getContext('2d'), S = cv.width;
+  const R = rng32((Math.abs((la * 1000) | 0) ^ Math.abs((lo * 1000) | 0)) >>> 0);
+  x.fillStyle = '#efe7d2'; x.fillRect(0, 0, S, S);
+  x.strokeStyle = 'rgba(90,70,40,.45)'; x.lineWidth = 1;
+  for (let i = 0; i < 4; i++) { const y = R() * S; x.beginPath(); x.moveTo(0, y); x.lineTo(S, y + (R() - .5) * 12); x.stroke(); }
+  for (let i = 0; i < 4; i++) { const px = R() * S; x.beginPath(); x.moveTo(px, 0); x.lineTo(px + (R() - .5) * 12, S); x.stroke(); }
+  x.strokeStyle = 'rgba(150,95,40,.85)'; x.lineWidth = 1.7;
+  x.beginPath(); x.moveTo(0, R() * S);
+  for (let px = 0; px <= S; px += 7) x.lineTo(px, S * .2 + R() * S * .6);
+  x.stroke();
+  const pinX = S * .5, pinY = S * .44;
+  x.fillStyle = '#e23b2a';
+  x.beginPath(); x.arc(pinX, pinY, S * .12, Math.PI, 0); x.lineTo(pinX, pinY + S * .26); x.closePath(); x.fill();
+  x.fillStyle = '#fff'; x.beginPath(); x.arc(pinX, pinY - S * .02, S * .045, 0, 7); x.fill();
+}
+
+/* drop one photo onto another -> sandwich them into a new double exposure */
+function srcOf(d) { return d.negative ? negCanvas(d) : d.canvases[0]; }
+function sandwichTargetAt(el, data, cx, cy) {
+  if (!el.classList.contains('flippable') || data.negative) return null;
+  for (const node of document.elementsFromPoint(cx, cy)) {
+    const card = node.closest && node.closest('.card');
+    if (card && card !== el && card.classList.contains('flippable')) {
+      const d = cardData.get(+card.dataset.id);
+      if (d && !d.negative) return card;
+    }
+  }
+  return null;
+}
+function makeSandwich(a, b) {
+  if (!a || !b) return;
+  const S = BAKE;
+  const c = mkCanvas(S, S), x = c.getContext('2d');
+  x.drawImage(srcOf(a), 0, 0, S, S);
+  x.globalCompositeOperation = 'screen'; x.globalAlpha = .92;
+  x.drawImage(srcOf(b), 0, 0, S, S);
+  x.globalCompositeOperation = 'source-over'; x.globalAlpha = 1;
+  applyGrain(x, S, .12);
+  flash(); sndShutter(); haptic(14);
+  const el = createCard({ canvases: [c], type: 'single' });
+  const d = cardData.get(+el.dataset.id);
+  d.caption = 'double exposure';
+  el.querySelector('.caption').textContent = d.caption;
+  eject(el);
   updateStudioCounts();
-  updateLightbox();
+  toast('Double exposure: two photos sandwiched into one.');
+}
+
+/* "toss" bursts the print into a cloud of its own pixels before it leaves */
+function disintegrate(el, done) {
+  const data = cardData.get(+el.dataset.id);
+  const r = el.getBoundingClientRect();
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches || !data || r.width < 4) { sndLab('tool'); done(); return; }
+  let src;
+  try { src = renderCardCanvas(data, 2); } catch { done(); return; }
+  const cv = document.createElement('canvas');
+  cv.className = 'disintegrate';
+  cv.style.left = r.left + 'px'; cv.style.top = r.top + 'px';
+  cv.style.width = r.width + 'px'; cv.style.height = r.height + 'px';
+  const DPR = Math.min(devicePixelRatio || 1, 2);
+  cv.width = Math.round(r.width * DPR); cv.height = Math.round(r.height * DPR);
+  document.body.append(cv);
+  const x = cv.getContext('2d');
+  const cols = 22, rows = Math.max(4, Math.round(cols * r.height / r.width));
+  const bw = cv.width / cols, bh = cv.height / rows;
+  const sw = src.width / cols, sh = src.height / rows;
+  const cells = [];
+  for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) cells.push({
+    sx: i * sw, sy: j * sh, x: i * bw, y: j * bh,
+    vx: (i / cols - .5) * rnd(180, 360) * DPR + rnd(-60, 60),
+    vy: (rnd(-260, -60) + (j / rows) * 120) * DPR,
+    vr: rnd(-8, 8), delay: (j / rows) * 130 + rnd(0, 60),
+  });
+  el.style.visibility = 'hidden';
+  haptic([6, 18, 10]);
+  const t0 = performance.now();
+  (function step(now) {
+    const t = now - t0;
+    x.clearRect(0, 0, cv.width, cv.height);
+    let alive = 0;
+    for (const c of cells) {
+      const lt = t - c.delay;
+      if (lt < 0) { x.drawImage(src, c.sx, c.sy, sw, sh, c.x, c.y, bw + 1, bh + 1); alive++; continue; }
+      const dt = lt / 1000;
+      const a = 1 - lt / 720;
+      if (a <= 0) continue;
+      alive++;
+      x.save();
+      x.globalAlpha = a;
+      x.translate(c.x + c.vx * dt + bw / 2, c.y + c.vy * dt + 1100 * DPR * dt * dt + bh / 2);
+      x.rotate(c.vr * dt);
+      x.drawImage(src, c.sx, c.sy, sw, sh, -bw / 2, -bh / 2, bw + 1, bh + 1);
+      x.restore();
+    }
+    if (alive) requestAnimationFrame(step);
+    else { cv.remove(); done(); }
+  })(t0);
+  sndLab('tool');
+}
+
+function removeCard(el, data) {
+  disintegrate(el, () => {
+    if (trayCard === el) trayCard = null;
+    if (data._timer) clearInterval(data._timer);
+    if (data.audioURL) URL.revokeObjectURL(data.audioURL);
+    cardData.delete(data.id);
+    el.remove();
+    updateStudioCounts();
+    updateLightbox();
+  });
+}
+
+/* throw momentum after a flick */
+function momentum(el, vx, vy) {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  if (Math.hypot(vx, vy) < 8) return;
+  let x = parseFloat(el.style.left) || 0, y = parseFloat(el.style.top) || 0;
+  let last = performance.now();
+  (function step(now) {
+    const dt = Math.min(40, now - last) / 16; last = now;
+    x += vx * dt; y += vy * dt;
+    vx *= 0.9; vy *= 0.9;
+    const w = el.offsetWidth;
+    if (x < -w + 80) { x = -w + 80; vx *= -.4; }
+    if (x > innerWidth - 80) { x = innerWidth - 80; vx *= -.4; }
+    if (y < 0) { y = 0; vy *= -.4; }
+    if (y > innerHeight - 60) { y = innerHeight - 60; vy *= -.4; }
+    el.style.left = x + 'px'; el.style.top = y + 'px';
+    if (Math.hypot(vx, vy) > 4) requestAnimationFrame(step);
+  })(last);
 }
 
 function bringTop(el) { el.style.zIndex = ++zTop; }
 
-/* drag + shake-to-develop + lightbox drop */
+/* drag + throw momentum + shake-to-develop + sandwich + flip + lightbox drop */
 function bindDrag(el, data) {
   el.addEventListener('pointerdown', e => {
     if (e.button !== 0) return;
-    if (e.target.closest('.caption, .tools')) return;
+    if (e.target.closest('.caption, .tools, .cb-edit, .cb-btn')) return;
     e.preventDefault();
     pullToWall(el);
     bringTop(el);
     const r = el.getBoundingClientRect();
     const ox = e.clientX - r.left - (r.width - el.offsetWidth) / 2;
     const oy = e.clientY - r.top - (r.height - el.offsetHeight) / 2;
-    const pid = e.pointerId;
+    const pid = e.pointerId, startX = e.clientX, startY = e.clientY;
     el.classList.add('dragging');
-    let lastX = e.clientX, lastDir = 0, shakes = 0, lastShakeT = 0, boosted = false, moved = false;
+    let lastX = e.clientX, lastY = e.clientY, lastT = performance.now();
+    let vx = 0, vy = 0, lastDir = 0, shakes = 0, lastShakeT = 0, boosted = false, moved = false;
+    let target = null;
     const holdPlay = data.audioURL ? setTimeout(() => { if (!moved) playCardAudio(data); }, 450) : null;
     const setBoost = on => {
       if (on === boosted) return;
       boosted = on;
       el.getAnimations({ subtree: true }).forEach(a => { a.playbackRate = on ? 3.2 : 1; });
     };
+    const clearTarget = () => { if (target) { target.classList.remove('sandwich-target'); target = null; } };
     const mv = ev => {
       if (ev.pointerId !== pid) return;
+      if (!moved && Math.hypot(ev.clientX - startX, ev.clientY - startY) < 4) return;
       moved = true;
       if (holdPlay) clearTimeout(holdPlay);
       el.style.left = (ev.clientX - ox) + 'px';
       el.style.top = (ev.clientY - oy) + 'px';
+      const now = performance.now(), dt = Math.max(8, now - lastT);
+      vx = (ev.clientX - lastX) / dt * 16;
+      vy = (ev.clientY - lastY) / dt * 16;
       const dx = ev.clientX - lastX;
       if (Math.abs(dx) > 5) {
         const dir = Math.sign(dx);
         if (lastDir !== 0 && dir !== lastDir) {
-          shakes++; lastShakeT = performance.now();
+          shakes++; lastShakeT = now;
           if (shakes >= 3 && el.classList.contains('developing')) setBoost(true);
         }
-        lastDir = dir; lastX = ev.clientX;
+        lastDir = dir;
       }
-      if (boosted && performance.now() - lastShakeT > 800) { shakes = 0; setBoost(false); }
+      lastX = ev.clientX; lastY = ev.clientY; lastT = now;
+      if (boosted && now - lastShakeT > 800) { shakes = 0; setBoost(false); }
+      const t = sandwichTargetAt(el, data, ev.clientX, ev.clientY);
+      if (t !== target) { clearTarget(); target = t; if (target) target.classList.add('sandwich-target'); }
     };
     const up = ev => {
       if (ev.pointerId !== pid) return;
@@ -867,7 +1129,15 @@ function bindDrag(el, data) {
       window.removeEventListener('pointercancel', up);
       el.classList.remove('dragging');
       setBoost(false);
-      if (data.negative && overlapsLightbox(el)) revealNegative(el, data);
+      if (!moved) {
+        const now = performance.now();
+        if (el.classList.contains('flippable') && now - (el._tapT || 0) < 320) { el._tapT = 0; toggleFlip(el, data); }
+        else el._tapT = now;
+        return;
+      }
+      if (target) { const tgt = target; clearTarget(); makeSandwich(data, cardData.get(+tgt.dataset.id)); return; }
+      if (data.negative && overlapsLightbox(el)) { revealNegative(el, data); return; }
+      momentum(el, vx, vy);
     };
     window.addEventListener('pointermove', mv);
     window.addEventListener('pointerup', up);
@@ -950,6 +1220,8 @@ function eject(el) {
   el.style.setProperty('--ejdur', tall ? '3.4s' : '2.6s');
   el.style.setProperty('--dev', '7.6s');
   el.classList.add('ejecting', 'developing');
+  transport.enter('ejecting');
+  haptic([10, 40, 16]);
   sndMotor(tall ? 3.2 : 2.4);
   $('.cam-shell').classList.add('kick');
   setTimeout(() => $('.cam-shell').classList.remove('kick'), 500);
@@ -1005,6 +1277,7 @@ function pulseFlashBeam() {
     beam.append(p);
   }
   beam.classList.remove('on'); void beam.offsetWidth; beam.classList.add('on');
+  labEvent('flash', { intensity: matchMedia('(prefers-reduced-motion: reduce)').matches ? .5 : 1 });
 }
 async function countdown(n) {
   vfCount.classList.remove('small');
@@ -1026,7 +1299,7 @@ function feedReady() {
   if (state.live && !vfVideo.videoWidth) { toast('Camera is warming up, try again in a second.'); return false; }
   return true;
 }
-function setBusy(on) { busy = on; document.body.classList.toggle('busy', on); }
+function setBusy(on) { busy = on; document.body.classList.toggle('busy', on); transport.enter(on ? 'exposing' : 'ready'); }
 
 function makeAndEject(canvases, type, opts = {}) {
   const stock = STOCKS[state.stock];
@@ -1224,6 +1497,7 @@ function cancelMotion(silent) {
 }
 
 function shutterPress() {
+  haptic(8);
   switch (state.mode) {
     case 'strip': stripFlow(); break;
     case 'wiggle': wiggleFlow(); break;
@@ -1422,6 +1696,38 @@ async function exportGifCard(d) {
   toast('GIF saved.');
 }
 
+/* shareable H.264: wigglegrams + flipbooks loop, singles play their develop-in */
+async function exportVideoCard(d) {
+  if (typeof window.exportFramesToVideo !== 'function') { toast('Video export unavailable here.'); return; }
+  await document.fonts.ready;
+  toast('Encoding video...');
+  await sleep(30);
+  const k = 2;
+  const frames = [], delaysCs = [];
+  if ((d.type === 'wiggle' || d.type === 'motion') && d.canvases.length > 1) {
+    const seq = d.type === 'wiggle' ? [0, 1, 2, 1] : d.canvases.map((_, i) => i);
+    const loops = d.type === 'wiggle' ? 8 : 3;
+    for (let l = 0; l < loops; l++) seq.forEach(i => {
+      frames.push(renderCardCanvas(d, k, { photo: d.canvases[i] }));
+      delaysCs.push(d.type === 'wiggle' ? 9 : 12);
+    });
+  } else {
+    const steps = 26;
+    for (let s = 0; s <= steps; s++) {
+      const t = s / steps;
+      frames.push(renderCardCanvas(d, k, {
+        filter: developFilter(t), hazeAlpha: (1 - t) * .55, stampAlpha: t < .72 ? 0 : .92,
+      }));
+      delaysCs.push(s === steps ? 90 : 8);
+    }
+  }
+  try {
+    const { blob, ext } = await window.exportFramesToVideo(frames, { fps: 12, delaysCs });
+    downloadBlob(blob, `shoebox-${String(d.id).padStart(3, '0')}.${ext}`);
+    toast(ext === 'mp4' ? 'MP4 saved.' : 'Video saved.');
+  } catch (err) { console.warn(err); toast('Video export failed.'); }
+}
+
 /* wall, zine, poster */
 function paintSurface(x, W, H) {
   if (state.surface === 'cork') {
@@ -1509,8 +1815,8 @@ function buildPDF(jpegU8, pw, ph) {
   return new Blob(chunks, { type: 'application/pdf' });
 }
 
-function playZineFold() {
-  const picks = latestCards(8);
+function playZineFold(customPicks) {
+  const picks = (customPicks && customPicks.length >= 8) ? customPicks.slice(0, 8) : latestCards(8);
   if (picks.length < 8) { toast(`Fold preview needs 8 photos. ${8 - picks.length} more to go.`); return; }
   const wrap = $('#zineFold'), book = $('#zineBook');
   book.querySelectorAll('i').forEach((page, i) => {
@@ -1531,11 +1837,11 @@ function playZineFold() {
 }
 
 /* classic one-sheet 8-panel zine imposition (cut the middle, fold) */
-async function exportZine() {
-  const picks = latestCards(8);
+async function exportZine(customPicks) {
+  const picks = (customPicks && customPicks.length >= 8) ? customPicks.slice(0, 8) : latestCards(8);
   if (picks.length < 8) { toast(`A zine needs 8 photos. ${8 - picks.length} more to go.`); return; }
   await document.fonts.ready;
-  if (state.lab.spatial) playZineFold();
+  if (state.lab.spatial) playZineFold(picks);
   toast('Folding the zine...');
   await sleep(30);
   const W = 2480, H = 1754, pw = W / 4, phh = H / 2;
@@ -1590,8 +1896,8 @@ async function exportZine() {
   toast('Zine PDF saved. Print it single-sided.');
 }
 
-async function exportPoster() {
-  const picks = latestCards(12);
+async function exportPoster(customPicks) {
+  const picks = (customPicks && customPicks.length >= 12) ? customPicks.slice(0, 12) : latestCards(12);
   if (picks.length < 12) { toast(`A poster needs 12 photos. ${12 - picks.length} more to go.`); return; }
   await document.fonts.ready;
   toast('Composing the poster...');
@@ -1712,8 +2018,10 @@ function syncSliders() {
   }
 }
 function updateGolden() {
+  const on = goldenFactor() > .25;
   const b = $('#stocks button[data-stock="goldenhour"]');
-  if (b) b.classList.toggle('golden-now', goldenFactor() > .25);
+  if (b) b.classList.toggle('golden-now', on);
+  document.body.classList.toggle('golden-now', on);
 }
 function syncStockTheme() {
   const theme = STOCK_THEME[state.stock] || STOCK_THEME.goldenhour;
@@ -1746,6 +2054,113 @@ function updateStudioCounts() {
   if (fold) fold.textContent = n >= 8 ? 'latest 8 photos as a booklet' : `need ${8 - n} more photos`;
   if (zine) zine.textContent = n >= 8 ? 'foldable PDF, latest 8 photos' : `need ${8 - n} more photos`;
   if (poster) poster.textContent = n >= 12 ? 'print-size PNG, latest 12 photos' : `need ${12 - n} more photos`;
+}
+
+/* shared setters so a tap (cycle) and a drag (dial) share one code path */
+function setExpo(v) {
+  state.expo = v; clearPending();
+  $('#ctlExpo').classList.toggle('on', v > 1);
+}
+function setTimer(v) {
+  state.timer = v;
+  $('#ctlTimer b').textContent = v ? v + 'S' : 'OFF';
+  $('#ctlTimer').classList.toggle('on', !!v);
+}
+function setZoom(v) {
+  state.zoom = v;
+  $('#ctlZoom b').textContent = v + 'x';
+  $('#ctlZoom').classList.toggle('on', v !== 1);
+  const sc = `scale(${v})`;
+  vfDemo.style.transform = sc;
+  vfVideo.style.transform = state.mirror ? `scaleX(-1) scale(${v})` : sc;
+}
+/* drag a control up/down to step through its detents, like a physical dial */
+function attachDial(id, cfg) {
+  const el = $('#' + id);
+  let pid = null, downY = 0, used = false;
+  el.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    pid = e.pointerId; downY = e.clientY; used = false;
+    el.setPointerCapture?.(pid);
+  });
+  el.addEventListener('pointermove', e => {
+    if (pid == null || e.pointerId !== pid) return;
+    if (Math.abs(downY - e.clientY) >= 22) {
+      const dir = Math.sign(downY - e.clientY);
+      const cur = cfg.cur();
+      const i = clamp(cfg.list.indexOf(cur) + dir, 0, cfg.list.length - 1);
+      if (cfg.list[i] !== cur) { cfg.set(cfg.list[i]); haptic(6); used = true; }
+      downY = e.clientY;
+    }
+  });
+  const end = e => {
+    if (pid == null) return;
+    pid = null;
+    el.releasePointerCapture?.(e.pointerId);
+    if (used && e.type === 'pointerup') {
+      const block = ev => { ev.stopImmediatePropagation(); el.removeEventListener('click', block, true); };
+      el.addEventListener('click', block, true);
+    }
+  };
+  el.addEventListener('pointerup', end);
+  el.addEventListener('pointercancel', end);
+}
+
+/* ---------------- contact sheet (find, filter, curate) ---------------- */
+const sheetSel = new Set();
+function selectedPicks() {
+  return [...cardData.values()].filter(d => sheetSel.has(d.id)).sort((a, b) => a.id - b.id);
+}
+function updateSheetFoot() {
+  const n = sheetSel.size;
+  $('#sheetCount').textContent = n ? `${n} selected` : 'tap photos to select';
+}
+function buildSheet(filter = 'all') {
+  const grid = $('#sheetGrid'); grid.innerHTML = '';
+  const cards = [...cardData.values()].sort((a, b) => b.id - a.id);
+  const present = [...new Set(cards.map(d => d.stock))];
+  const chips = $('#sheetFilters'); chips.innerHTML = '';
+  const mkChip = (key, label) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.textContent = label;
+    b.classList.toggle('on', filter === key);
+    b.addEventListener('click', () => buildSheet(key));
+    chips.append(b);
+  };
+  mkChip('all', `All (${cards.length})`);
+  present.forEach(s => mkChip(s, (STOCKS[s]?.name || s)));
+  const shown = cards.filter(d => filter === 'all' || d.stock === filter);
+  if (!shown.length) { grid.innerHTML = '<p class="sheet-empty">No photos yet — shoot a few.</p>'; updateSheetFoot(); return; }
+  for (const d of shown) {
+    const cell = document.createElement('button');
+    cell.type = 'button';
+    cell.className = 'sheet-cell' + (sheetSel.has(d.id) ? ' sel' : '');
+    const img = new Image();
+    img.src = labPreviewURL(d, 240); img.alt = d.caption || 'photo';
+    const meta = document.createElement('span');
+    meta.className = 'sheet-meta';
+    meta.textContent = `${(STOCKS[d.stock]?.name || '').split(' ')[0]} · ${d.date}`;
+    cell.append(img, meta);
+    cell.addEventListener('click', () => {
+      sheetSel.has(d.id) ? sheetSel.delete(d.id) : sheetSel.add(d.id);
+      cell.classList.toggle('sel', sheetSel.has(d.id));
+      updateSheetFoot();
+    });
+    grid.append(cell);
+  }
+  updateSheetFoot();
+}
+function openSheet() {
+  if (!cardData.size) { toast('Nothing to show yet.'); return; }
+  $('#darkroom').hidden = $('#studio').hidden = $('#labPanel').hidden = true;
+  sheetSel.clear();
+  buildSheet('all');
+  const s = $('#sheet'); s.hidden = false;
+  requestAnimationFrame(() => s.classList.add('open'));
+}
+function closeSheet() {
+  const s = $('#sheet'); s.classList.remove('open');
+  setTimeout(() => { s.hidden = true; }, 240);
 }
 
 /* on-camera popovers */
@@ -1826,24 +2241,12 @@ function bindControls() {
     if (!e.target.closest('#popover, #ctlMode, #ctlLens')) closePopover();
   });
 
-  $('#ctlExpo').addEventListener('click', () => {
-    state.expo = state.expo === 3 ? 1 : state.expo + 1;
-    clearPending();
-    $('#ctlExpo').classList.toggle('on', state.expo > 1);
-  });
-  $('#ctlTimer').addEventListener('click', () => {
-    state.timer = state.timer === 0 ? 3 : state.timer === 3 ? 10 : 0;
-    $('#ctlTimer b').textContent = state.timer ? state.timer + 'S' : 'OFF';
-    $('#ctlTimer').classList.toggle('on', !!state.timer);
-  });
-  $('#ctlZoom').addEventListener('click', () => {
-    state.zoom = state.zoom === 1 ? 1.4 : state.zoom === 1.4 ? 2 : 1;
-    $('#ctlZoom b').textContent = state.zoom + 'x';
-    $('#ctlZoom').classList.toggle('on', state.zoom !== 1);
-    const sc = `scale(${state.zoom})`;
-    vfDemo.style.transform = sc;
-    vfVideo.style.transform = state.mirror ? `scaleX(-1) scale(${state.zoom})` : sc;
-  });
+  $('#ctlExpo').addEventListener('click', () => setExpo(state.expo === 3 ? 1 : state.expo + 1));
+  $('#ctlTimer').addEventListener('click', () => setTimer(state.timer === 0 ? 3 : state.timer === 3 ? 10 : 0));
+  $('#ctlZoom').addEventListener('click', () => setZoom(state.zoom === 1 ? 1.4 : state.zoom === 1.4 ? 2 : 1));
+  attachDial('ctlExpo', { list: [1, 2, 3], cur: () => state.expo, set: setExpo });
+  attachDial('ctlTimer', { list: [0, 3, 10], cur: () => state.timer, set: setTimer });
+  attachDial('ctlZoom', { list: [1, 1.4, 2], cur: () => state.zoom, set: setZoom });
   $('#ctlFlip').addEventListener('click', () => {
     if (!state.live) { toast('Flip works on the live feed. Press FEED first.'); return; }
     state.facing = state.facing === 'user' ? 'environment' : 'user';
@@ -1876,10 +2279,23 @@ function bindControls() {
     $('#studio').hidden = true;
     $('#labPanel').hidden = !$('#labPanel').hidden;
   });
-  $('#stWall').addEventListener('click', exportWall);
-  $('#stFold').addEventListener('click', playZineFold);
-  $('#stZine').addEventListener('click', exportZine);
-  $('#stPoster').addEventListener('click', exportPoster);
+  $('#stWall').addEventListener('click', () => exportWall());
+  $('#stFold').addEventListener('click', () => playZineFold());
+  $('#stZine').addEventListener('click', () => exportZine());
+  $('#stPoster').addEventListener('click', () => exportPoster());
+
+  $('#btnSheet').addEventListener('click', openSheet);
+  $('#sheetClose').addEventListener('click', closeSheet);
+  $('#sheetZine').addEventListener('click', () => {
+    const p = selectedPicks();
+    if (p.length && p.length < 8) { toast(`Select 8 for a zine (${p.length} chosen).`); return; }
+    closeSheet(); exportZine(p.length ? p : null);
+  });
+  $('#sheetPoster').addEventListener('click', () => {
+    const p = selectedPicks();
+    if (p.length && p.length < 12) { toast(`Select 12 for a poster (${p.length} chosen).`); return; }
+    closeSheet(); exportPoster(p.length ? p : null);
+  });
   for (const [id, key] of [['#labSpatial', 'spatial'], ['#labShader', 'shader'], ['#labLens', 'lens'], ['#labSound', 'sound']]) {
     const input = $(id);
     input.addEventListener('change', () => {
@@ -1962,6 +2378,42 @@ function setupTilt() {
   });
 }
 
+/* ambient light: real room light drives the live light-leak intensity */
+let ambientSensor = null, ambientOn = false;
+function setupAmbient() {
+  const btn = $('#ambientBtn');
+  if (!btn) return;
+  if (!('AmbientLightSensor' in window)) { btn.hidden = true; return; }
+  $('#deskSec').hidden = false; btn.hidden = false;
+  btn.addEventListener('click', async () => {
+    if (ambientOn) {
+      ambientOn = false;
+      try { ambientSensor?.stop(); } catch {}
+      document.documentElement.style.removeProperty('--ambient-leak');
+      applyPreviewFilters();
+      btn.textContent = 'Room light: off'; btn.classList.remove('on');
+      return;
+    }
+    try {
+      if (navigator.permissions) {
+        const p = await navigator.permissions.query({ name: 'ambient-light-sensor' }).catch(() => null);
+        if (p && p.state === 'denied') { toast('Room-light sensor is blocked.'); return; }
+      }
+      ambientSensor = new AmbientLightSensor({ frequency: 4 });
+      ambientSensor.addEventListener('reading', () => {
+        const lux = ambientSensor.illuminance || 0;
+        const dark = clamp(1 - lux / 350, 0, 1);
+        document.documentElement.style.setProperty('--ambient-leak', (0.2 + dark * 0.65).toFixed(2));
+        const leak = $('.vf-leak');
+        if (leak) leak.style.opacity = (0.18 + dark * 0.6).toFixed(2);
+      });
+      ambientSensor.addEventListener('error', () => { toast('Room-light sensor unavailable.'); ambientOn = false; btn.textContent = 'Room light: off'; btn.classList.remove('on'); });
+      ambientSensor.start();
+      ambientOn = true; btn.textContent = 'Room light: on'; btn.classList.add('on');
+    } catch { toast('Room-light sensor unavailable.'); }
+  });
+}
+
 /* ---------------- demo wall samples ---------------- */
 function sampleCards() {
   const make = (sceneFn, t, stock, frame, caption, lx, ty, rot) => {
@@ -1993,6 +2445,7 @@ syncStockTheme();
 syncLab();
 $('#zineFold').style.display = 'none';
 setupTilt();
+setupAmbient();
 setupPWA();
 requestAnimationFrame(masterLoop);
 SCENES[state.scene].draw(dctx, performance.now(), vfDemo.width);

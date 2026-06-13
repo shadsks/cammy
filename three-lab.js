@@ -6,12 +6,53 @@
 
   let THREE;
   try {
-    THREE = await import('https://unpkg.com/three@0.160.0/build/three.module.js');
+    THREE = await import('three');
   } catch (err) {
     host.style.display = 'none';
     console.warn('Shoebox spatial lab unavailable:', err);
     return;
   }
+
+  /* develop-as-a-shader: the ejected photo clears from milky emulsion to image,
+     center-outward, with a silver-grain dissolve. */
+  const DEVELOP_VS =
+    'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }';
+  const DEVELOP_FS = `
+    varying vec2 vUv;
+    uniform sampler2D uMap; uniform float uProg; uniform float uOpacity;
+    float hash(vec2 p){ return fract(sin(dot(p, vec2(41.3, 289.1))) * 43758.5453); }
+    void main(){
+      vec4 tex = texture2D(uMap, vUv);
+      float d = distance(vUv, vec2(0.5));
+      float clear = clamp(uProg * 1.45 - d, 0.0, 1.0);
+      clear = smoothstep(0.0, 1.0, clear);
+      vec3 milk = vec3(0.86, 0.82, 0.74);
+      vec3 col = mix(milk, tex.rgb, clear);
+      col *= mix(0.45, 1.0, clear);
+      float g = hash(vUv * 430.0 + uProg * 7.0);
+      col += (g - 0.5) * 0.12 * (1.0 - clear);
+      gl_FragColor = vec4(col, uOpacity);
+    }`;
+
+  /* postprocessing film pass: grain + vignette weighted by coverage (alpha),
+     so the transparent page behind the overlay stays clean. */
+  const FILM_FS = `
+    varying vec2 vUv;
+    uniform sampler2D tDiffuse; uniform float uTime; uniform float uAmt;
+    float hash(vec2 p){ return fract(sin(dot(p, vec2(12.9, 78.2))) * 43758.5453); }
+    void main(){
+      vec4 c = texture2D(tDiffuse, vUv);
+      float g = hash(vUv * vec2(640.0, 360.0) + uTime);
+      c.rgb += (g - 0.5) * 0.06 * uAmt * c.a;
+      float d = distance(vUv, vec2(0.5));
+      c.rgb *= mix(1.0, 1.0 - d * 0.5, uAmt * c.a);
+      gl_FragColor = c;
+    }`;
+
+  let shaderOn = true;
+  const reliefs = [];
+  let composer = null, filmPass = null, useComposer = false;
+  let flashLevel = 0;
 
   const reduced = matchMedia('(prefers-reduced-motion: reduce)');
   const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
@@ -39,6 +80,7 @@
   function resize() {
     const w = innerWidth, h = innerHeight;
     renderer.setSize(w, h, false);
+    if (composer) composer.setSize(w, h);
     camera.left = -w / 2;
     camera.right = w / 2;
     camera.top = h / 2;
@@ -56,12 +98,15 @@
   const brassMat = new THREE.MeshStandardMaterial({ color: 0xc08a5e, roughness: .32, metalness: .45 });
   const glassMat = new THREE.MeshPhysicalMaterial({
     color: 0x29333b,
-    roughness: .08,
+    roughness: .06,
     metalness: .02,
-    transmission: .35,
-    thickness: 1.2,
+    transmission: .7,
+    thickness: 2.4,
+    ior: 1.5,
+    clearcoat: 1,
+    clearcoatRoughness: .12,
     transparent: true,
-    opacity: .68,
+    opacity: .7,
   });
 
   const body = new THREE.Mesh(new THREE.BoxGeometry(330, 182, 48), shellMat);
@@ -84,6 +129,16 @@
   shutter.position.set(105, -16, 38);
   cameraGroup.add(body, grip, slot, lensRing, lensGlass, shutter);
   scene.add(cameraGroup);
+
+  // volumetric flash cone: god-rays from the lens through the dust
+  const godrayMat = new THREE.MeshBasicMaterial({
+    color: 0xfff0cf, transparent: true, opacity: 0,
+    blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+  });
+  const godray = new THREE.Mesh(new THREE.ConeGeometry(150, 430, 28, 1, true), godrayMat);
+  godray.position.set(-58, 150, 70);
+  godray.rotation.z = -0.42;
+  cameraGroup.add(godray);
 
   function positionCameraModel() {
     const mobile = innerWidth < 640;
@@ -135,13 +190,12 @@
       const width = detail.type === 'strip' ? 94 : 150;
       const height = detail.type === 'strip' ? 310 : detail.type === 'grid' ? 164 : 190;
       const geo = new THREE.PlaneGeometry(width, height, 16, 18);
-      const mat = new THREE.MeshStandardMaterial({
-        map: texture,
-        roughness: .62,
-        metalness: .01,
-        side: THREE.DoubleSide,
+      const mat = new THREE.ShaderMaterial({
+        uniforms: { uMap: { value: texture }, uProg: { value: 0 }, uOpacity: { value: .96 } },
         transparent: true,
-        opacity: .96,
+        side: THREE.DoubleSide,
+        vertexShader: DEVELOP_VS,
+        fragmentShader: DEVELOP_FS,
       });
       const mesh = new THREE.Mesh(geo, mat);
       mesh.userData.width = width;
@@ -213,12 +267,49 @@
     host.style.display = enabled ? '' : 'none';
   }
 
+  function disposeMesh(m) {
+    m.geometry.dispose();
+    m.material.map?.dispose();
+    m.material.dispose();
+    scene.remove(m);
+  }
+  // bas-relief "3D-ify": displace a plane by the photo's luminance
+  function buildRelief(image) {
+    if (!enabled || reduced.matches || !image) return;
+    loader.load(image, texture => {
+      texture.colorSpace = THREE.SRGBColorSpace;
+      const seg = 64;
+      const cn = document.createElement('canvas'); cn.width = cn.height = seg + 1;
+      cn.getContext('2d').drawImage(texture.image, 0, 0, seg + 1, seg + 1);
+      const dat = cn.getContext('2d').getImageData(0, 0, seg + 1, seg + 1).data;
+      const geo = new THREE.PlaneGeometry(260, 260, seg, seg);
+      const pos = geo.attributes.position;
+      for (let i = 0; i < pos.count; i++) {
+        const ux = i % (seg + 1), uy = seg - Math.floor(i / (seg + 1));
+        const p = (uy * (seg + 1) + ux) * 4;
+        const lum = (dat[p] * .299 + dat[p + 1] * .587 + dat[p + 2] * .114) / 255;
+        pos.setZ(i, lum * 46);
+      }
+      geo.computeVertexNormals();
+      const mat = new THREE.MeshStandardMaterial({ map: texture, roughness: .72, metalness: .02, side: THREE.DoubleSide, transparent: true });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.set(0, 0, 170);
+      mesh.userData.born = performance.now();
+      scene.add(mesh);
+      reliefs.push(mesh);
+      while (reliefs.length > 2) disposeMesh(reliefs.shift());
+    });
+  }
+
   addEventListener('shoebox:photo-eject', e => addFlyingPhoto(e.detail));
   addEventListener('shoebox:card-settled', e => addStackGhost(e.detail));
   addEventListener('shoebox:lens', e => updateLens(e.detail.lens));
   addEventListener('shoebox:stock', e => updateStock(e.detail.theme));
+  addEventListener('shoebox:flash', e => { if (enabled && !reduced.matches) flashLevel = Math.max(flashLevel, e.detail?.intensity || 1); });
+  addEventListener('shoebox:depth', e => buildRelief(e.detail?.image));
   addEventListener('shoebox:settings', e => {
     setEnabled(e.detail.lab?.spatial !== false);
+    shaderOn = e.detail.lab?.shader !== false;
     updateLens(e.detail.lens || 'normal');
   });
   addEventListener('resize', resize);
@@ -249,12 +340,13 @@
       item.mesh.position.x += Math.sin(p * Math.PI) * 22;
       item.mesh.rotation.x = .18 + Math.sin(p * Math.PI) * .48;
       item.mesh.rotation.y = -.2 + Math.sin(p * Math.PI * .9) * .22;
-      item.mesh.rotation.z += .0025;
-      item.mesh.material.opacity = p > .82 ? (1 - p) / .18 * .96 : .96;
+      item.mesh.rotation.z += .004;
+      item.mesh.material.uniforms.uProg.value = Math.min(1, ease * 1.15);
+      item.mesh.material.uniforms.uOpacity.value = p > .82 ? (1 - p) / .18 * .96 : .96;
       bendPlane(item.mesh, p);
       if (p >= 1) {
         item.mesh.geometry.dispose();
-        item.mesh.material.map?.dispose();
+        item.mesh.material.uniforms?.uMap?.value?.dispose?.();
         item.mesh.material.dispose();
         scene.remove(item.mesh);
         flying.splice(i, 1);
@@ -265,7 +357,53 @@
       const age = Math.min(1, (now - mesh.userData.life) / 1200);
       mesh.material.opacity = .11 * age;
     }
-    renderer.render(scene, camera);
+
+    // flash god-rays decay + a dust sparkle on the burst
+    if (flashLevel > 0.002) {
+      godrayMat.opacity = flashLevel * .5;
+      godray.scale.set(1 + (1 - flashLevel) * .4, 1, 1);
+      dust.material.opacity = .26 + flashLevel * .5;
+      flashLevel *= .9;
+    } else if (godrayMat.opacity !== 0) {
+      godrayMat.opacity = 0; dust.material.opacity = .26;
+    }
+
+    // bas-relief prints tilt to reveal their luminance depth, then fade out
+    for (let i = reliefs.length - 1; i >= 0; i--) {
+      const m = reliefs[i];
+      const age = (now - m.userData.born) / 1000;
+      m.rotation.y = Math.sin(age * .8) * .6;
+      m.rotation.x = Math.sin(age * .5) * .12;
+      if (age > 7) {
+        m.material.opacity = Math.max(0, 1 - (age - 7));
+        if (age > 8) { disposeMesh(m); reliefs.splice(i, 1); }
+      }
+    }
+
+    if (useComposer && shaderOn) { filmPass.uniforms.uTime.value = t; composer.render(); }
+    else renderer.render(scene, camera);
+  }
+
+  try {
+    const [{ EffectComposer }, { RenderPass }, { ShaderPass }] = await Promise.all([
+      import('three/addons/postprocessing/EffectComposer.js'),
+      import('three/addons/postprocessing/RenderPass.js'),
+      import('three/addons/postprocessing/ShaderPass.js'),
+    ]);
+    composer = new EffectComposer(renderer);
+    composer.addPass(new RenderPass(scene, camera));
+    filmPass = new ShaderPass({
+      uniforms: { tDiffuse: { value: null }, uTime: { value: 0 }, uAmt: { value: 1 } },
+      vertexShader: DEVELOP_VS,
+      fragmentShader: FILM_FS,
+    });
+    filmPass.renderToScreen = true;
+    composer.addPass(filmPass);
+    composer.setSize(innerWidth, innerHeight);
+    useComposer = true;
+  } catch (err) {
+    useComposer = false;
+    console.warn('Shoebox film pass unavailable:', err);
   }
 
   resize();
