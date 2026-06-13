@@ -1,0 +1,14 @@
+{
+  "name": "SHOEBOX instant camera",
+  "short_name": "Shoebox",
+  "description": "A retro instant camera that runs entirely in your browser.",
+  "start_url": ".",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#84582f",
+  "theme_color": "#1c1916",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}

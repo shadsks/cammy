@@ -2,10 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Shoebox - instant camera</title>
 <meta name="theme-color" content="#1c1916">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%23f6f2ea'/%3E%3Crect x='3' y='3' width='10' height='8' fill='%231c1916'/%3E%3Ccircle cx='8' cy='7' r='2.6' fill='%23e23b2a'/%3E%3C/svg%3E">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600&family=Space+Grotesk:wght@400;500;600;700&family=VT323&display=swap" rel="stylesheet">
@@ -25,7 +26,7 @@
 
   <nav class="topbar">
     <button id="btnDarkroom" type="button">Darkroom</button>
-    <button id="btnExport" type="button">Save wall</button>
+    <button id="btnStudio" type="button">Studio</button>
     <button id="btnClear" type="button">Clear</button>
     <button id="btnSound" type="button" aria-pressed="true">Sound: on</button>
   </nav>
@@ -65,48 +66,93 @@
       <h3>Surface</h3>
       <div class="swatches" id="surfaces"></div>
     </section>
+
+    <section id="deskSec" hidden>
+      <h3>Desk</h3>
+      <button id="tiltBtn" class="wide" type="button">Tilt drift: off</button>
+    </section>
+  </aside>
+
+  <aside id="studio" class="panel" hidden>
+    <h2>Studio</h2>
+    <div class="studio-list">
+      <button id="stWall" type="button"><strong>Save the wall</strong><span>one PNG of the whole desk</span></button>
+      <button id="stZine" type="button"><strong>Mini zine</strong><span>foldable PDF, latest 8 photos</span></button>
+      <button id="stPoster" type="button"><strong>Poster</strong><span>print-size PNG, latest 12 photos</span></button>
+    </div>
   </aside>
 
   <!-- the camera -->
-  <div id="camera">
+  <div id="camera" data-lens="normal">
     <div id="ejector"></div>
     <div class="cam-shell">
-      <div class="cam-top"><div class="slot"></div></div>
+      <div class="cam-top">
+        <div class="meter" title="Light meter"><i id="meterNeedle"></i></div>
+        <div class="slot"></div>
+      </div>
       <div class="cam-face">
         <div class="vf-ring">
+          <span class="lens-tag" id="lensTag">STD 40</span>
+          <div class="lens-barrel">
           <div class="viewfinder" id="viewfinder">
             <video id="vfVideo" autoplay playsinline muted hidden></video>
             <canvas id="vfDemo" width="720" height="720"></canvas>
+            <canvas id="vfFx" width="240" height="240" hidden></canvas>
             <img id="vfGhost" alt="" hidden>
             <div class="vf-tint" aria-hidden="true"></div>
             <div class="vf-leak" aria-hidden="true"></div>
             <div class="vf-vignette" aria-hidden="true"></div>
             <div class="vf-grain" aria-hidden="true"></div>
+            <div class="vf-glass" aria-hidden="true"></div>
+            <div class="vf-prog" id="vfProg" hidden></div>
+            <div class="vf-rec" id="vfRec" hidden><span>REC</span></div>
             <div class="vf-rail" id="vfRail" hidden></div>
+            <div class="vf-motion" id="vfMotion" hidden>
+              <span id="motionN">0</span>
+              <button id="motionDone" type="button">DEVELOP</button>
+            </div>
             <div class="vf-count" id="vfCount" hidden></div>
+          </div>
           </div>
         </div>
         <div class="cam-right">
           <div class="rainbow" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
-          <button id="shutter" class="shutter" type="button" aria-label="Take photo"><span></span></button>
+          <div class="shutter-ring">
+            <button id="shutter" class="shutter" type="button" aria-label="Take photo. Hold to record a voice note"><span></span></button>
+          </div>
         </div>
       </div>
+      <div class="popover" id="popover" hidden></div>
       <div class="cam-controls">
+        <button class="ctl" id="ctlMode"  type="button">MODE<b>SINGLE</b></button>
+        <button class="ctl" id="ctlLens"  type="button">LENS<b>STD</b></button>
+        <button class="ctl" id="ctlExpo"  type="button">EXPO<b>1X</b></button>
         <button class="ctl" id="ctlTimer" type="button">TIMER<b>OFF</b></button>
-        <button class="ctl" id="ctlStrip" type="button">STRIP<b>OFF</b></button>
-        <button class="ctl" id="ctlDx"    type="button">DOUBLE<b>OFF</b></button>
         <button class="ctl" id="ctlZoom"  type="button">ZOOM<b>1x</b></button>
         <button class="ctl" id="ctlFlip"  type="button">FLIP<b>CAM</b></button>
         <button class="ctl" id="ctlSrc"   type="button">FEED<b>DEMO</b></button>
         <button class="ctl" id="ctlScene" type="button">SCENE<b>DUSK</b></button>
       </div>
-      <div class="cam-grip"><span>SHOEBOX 600</span></div>
+      <div class="cam-grip"></div>
+    </div>
+  </div>
+
+  <div id="lightbox" hidden><span>LIGHTBOX</span></div>
+
+  <div id="qrModal" class="modal" hidden>
+    <div class="modal-card">
+      <h2>Beam to your phone</h2>
+      <canvas id="qrCanvas" width="280" height="280"></canvas>
+      <p>Scan with your phone camera. Some scanners can't open image links; Google Lens handles them well.</p>
+      <button id="qrClose" type="button">Close</button>
     </div>
   </div>
 
   <div id="flash" aria-hidden="true"></div>
   <div id="toast" role="status"></div>
 
+  <script src="https://unpkg.com/qrcode-generator@1.4.4/qrcode.js" defer></script>
+  <script src="gif.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
