@@ -10,14 +10,19 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600&family=Space+Grotesk:wght@400;500;600;700&family=VT323&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=lab6">
+<link rel="stylesheet" href="shoebox-lab.css?v=lab6">
 </head>
 <body class="bg-cork demo">
 
   <!-- the desk / photo wall -->
+  <div id="spatialLab" class="spatial-lab" aria-hidden="true">
+    <canvas id="spatialCanvas"></canvas>
+  </div>
   <div id="wall" aria-label="Photo wall"></div>
   <div class="wall-shade" aria-hidden="true"></div>
   <div class="wall-grain" aria-hidden="true"></div>
+  <div id="flashBeam" class="flash-beam" aria-hidden="true"></div>
 
   <header class="brand">
     <h1>SHOEBOX</h1>
@@ -27,6 +32,7 @@
   <nav class="topbar">
     <button id="btnDarkroom" type="button">Darkroom</button>
     <button id="btnStudio" type="button">Studio</button>
+    <button id="btnLab" type="button" aria-pressed="true">Lab</button>
     <button id="btnClear" type="button">Clear</button>
     <button id="btnSound" type="button" aria-pressed="true">Sound: on</button>
   </nav>
@@ -77,8 +83,31 @@
     <h2>Studio</h2>
     <div class="studio-list">
       <button id="stWall" type="button"><strong>Save the wall</strong><span>one PNG of the whole desk</span></button>
+      <button id="stFold" type="button"><strong>Fold preview</strong><span>latest 8 photos as a booklet</span></button>
       <button id="stZine" type="button"><strong>Mini zine</strong><span>foldable PDF, latest 8 photos</span></button>
       <button id="stPoster" type="button"><strong>Poster</strong><span>print-size PNG, latest 12 photos</span></button>
+    </div>
+  </aside>
+
+  <aside id="labPanel" class="panel lab-panel" hidden>
+    <h2>Lab</h2>
+    <div class="lab-switches">
+      <label title="3D paper curl, eject mirror, lens glass, and desk particles">
+        <input id="labSpatial" type="checkbox" checked>
+        <span><strong>Spatial</strong><em>3D desk</em></span>
+      </label>
+      <label title="Halation, chromatic smear, grain, and gate weave">
+        <input id="labShader" type="checkbox" checked>
+        <span><strong>Shader</strong><em>film pass</em></span>
+      </label>
+      <label title="Interactive fisheye, prism, and split lens objects">
+        <input id="labLens" type="checkbox" checked>
+        <span><strong>Glass</strong><em>lens lab</em></span>
+      </label>
+      <label title="Mechanical identities for controls and camera actions">
+        <input id="labSound" type="checkbox" checked>
+        <span><strong>Soundboard</strong><em>mechanics</em></span>
+      </label>
     </div>
   </aside>
 
@@ -102,6 +131,7 @@
             <div class="vf-tint" aria-hidden="true"></div>
             <div class="vf-leak" aria-hidden="true"></div>
             <div class="vf-vignette" aria-hidden="true"></div>
+            <div class="vf-shader" aria-hidden="true"></div>
             <div class="vf-grain" aria-hidden="true"></div>
             <div class="vf-glass" aria-hidden="true"></div>
             <div class="vf-prog" id="vfProg" hidden></div>
@@ -139,10 +169,18 @@
 
   <div id="lightbox" hidden><span>LIGHTBOX</span></div>
 
+  <div id="zineFold" class="zine-fold" hidden aria-hidden="true">
+    <div class="zine-book" id="zineBook">
+      <i></i><i></i><i></i><i></i>
+      <i></i><i></i><i></i><i></i>
+    </div>
+  </div>
+
   <div id="flash" aria-hidden="true"></div>
   <div id="toast" role="status"></div>
 
-  <script src="gif.js"></script>
-  <script src="app.js"></script>
+  <script src="gif.js?v=lab6"></script>
+  <script src="app.js?v=lab6"></script>
+  <script type="module" src="three-lab.js?v=lab6"></script>
 </body>
 </html>

@@ -35,12 +35,17 @@ const state = {
   motion: [],          // stop-motion frames (baked)
   timer: 0, zoom: 1,
   stripLayout: 'strip',
+  lab: { spatial: true, shader: true, lens: true, sound: true },
   sound: true, luma: .5,
 };
 let busy = false, exposureActive = false, trayCard = null, stream = null;
 let zTop = 10, uid = 0;
 const cardData = new Map();
 const hinted = new Set();
+
+function labEvent(type, detail = {}) {
+  window.dispatchEvent(new CustomEvent('shoebox:' + type, { detail }));
+}
 
 /* ---------------- film stocks ---------------- */
 const STOCKS = {
@@ -82,6 +87,26 @@ const SURFACES = {
   felt: { name: 'Felt', swatch: 'radial-gradient(circle at 50% 35%,#346049,#24463a)' },
 };
 const LEAK_COLORS = ['255,90,40', '255,150,60', '255,60,90', '255,40,40'];
+
+const STOCK_THEME = {
+  goldenhour: ['#f5b06a', '#d96f4b', '#fff1cf'],
+  poolside: ['#8fd0c6', '#4f93a8', '#d8fbff'],
+  tungsten: ['#e0883e', '#7a3b22', '#ffd7a8'],
+  staticbw: ['#d8d8d8', '#5a5a5a', '#f8f8f8'],
+  disco: ['#e85d9e', '#7a3bd1', '#ffd2ed'],
+  expired86: ['#c9c389', '#6f7a4a', '#f1e9b8'],
+  negative99: ['#ff8a3c', '#54392a', '#ffcf9d'],
+};
+
+const PRINT = {
+  paper: '#f6f2ea',
+  ink: '#3f372c',
+  guide: '#b9b09e',
+  muted: '#8a7f6c',
+  stamp: '#ffa133',
+  font: '"Space Grotesk", sans-serif',
+  mono: 'VT323, monospace',
+};
 
 const MODES = {
   single: { label: 'SINGLE', hint: 'one shot' },
@@ -165,6 +190,26 @@ function sndBeep(final) {
   o.type = 'sine'; o.frequency.value = final ? 1320 : 880;
   g.gain.setValueAtTime(.12, t); g.gain.exponentialRampToValueAtTime(.001, t + .09);
   o.connect(g).connect(master); o.start(t); o.stop(t + .1);
+}
+function sndLab(kind = 'tap') {
+  if (!state.lab.sound) return;
+  const ac = audio(); if (!ac) return;
+  const t = ac.currentTime;
+  const note = {
+    tap: [620, .028, .045],
+    toggle: [420, .035, .06],
+    lens: [760, .045, .07],
+    tool: [540, .026, .04],
+    fold: [330, .06, .08],
+  }[kind] || [560, .03, .05];
+  const o = ac.createOscillator(), g = ac.createGain();
+  o.type = kind === 'fold' ? 'triangle' : 'square';
+  o.frequency.setValueAtTime(note[0], t);
+  o.frequency.exponentialRampToValueAtTime(note[0] * .72, t + note[1]);
+  g.gain.setValueAtTime(note[2], t);
+  g.gain.exponentialRampToValueAtTime(.001, t + note[1] + .03);
+  o.connect(g).connect(master);
+  o.start(t); o.stop(t + note[1] + .04);
 }
 
 /* ---------------- voice notes (mic) ---------------- */
@@ -479,6 +524,47 @@ function applyDust(x, S, amt, R) {
   }
   x.restore();
 }
+function applyHalation(c, x, S, amt) {
+  if (amt <= 0) return;
+  const glow = mkCanvas(S, S), gx = glow.getContext('2d');
+  gx.filter = `brightness(${(1.16 + amt * .2).toFixed(2)}) saturate(${(1.12 + amt * .28).toFixed(2)}) blur(${(S * (.008 + amt * .01)).toFixed(1)}px)`;
+  gx.drawImage(c, 0, 0);
+  x.save();
+  x.globalCompositeOperation = 'screen';
+  x.globalAlpha = .08 + amt * .12;
+  x.drawImage(glow, 0, 0);
+  x.restore();
+}
+function applyChromaticSmear(c, x, S, amt, R) {
+  if (amt <= 0) return;
+  const src = mkCanvas(S, S);
+  src.getContext('2d').drawImage(c, 0, 0);
+  const drift = (1.5 + amt * 5) * (R() < .5 ? -1 : 1);
+  x.save();
+  x.globalCompositeOperation = 'screen';
+  x.globalAlpha = .045 + amt * .055;
+  x.filter = 'hue-rotate(155deg) saturate(1.35)';
+  x.drawImage(src, drift, 0);
+  x.filter = 'hue-rotate(-30deg) saturate(1.18)';
+  x.drawImage(src, -drift * .65, drift * .18);
+  x.restore();
+}
+function applyGateWeave(x, S, amt, R) {
+  if (amt <= 0) return;
+  const lines = Math.round(2 + amt * 7);
+  x.save();
+  x.globalAlpha = .05 + amt * .08;
+  x.fillStyle = '#fff5df';
+  for (let i = 0; i < lines; i++) {
+    const y = (i / lines) * S + (R() - .5) * S * .01;
+    x.fillRect(0, y, S, Math.max(1, S * .0015));
+  }
+  x.globalAlpha = .08 + amt * .12;
+  x.fillStyle = '#1c1208';
+  x.fillRect(0, 0, Math.max(1, S * .0025), S);
+  x.fillRect(S - Math.max(1, S * .002), 0, Math.max(1, S * .002), S);
+  x.restore();
+}
 function applyExpired(x, S, R) {
   const rr = (a, b) => a + R() * (b - a);
   x.save();
@@ -539,10 +625,16 @@ function bake(frames, opts = {}) {
 
   x.filter = stock.base + extra;
   const alphas = [1, .55, .45];
+  const shaderOn = state.lab.shader && !opts.noShader;
+  const weaveX = shaderOn ? (R() - .5) * (1.8 + fx.grain / 32) : 0;
+  const weaveY = shaderOn ? (R() - .5) * (1.1 + fx.grain / 70) : 0;
+  x.save();
+  x.translate(weaveX, weaveY);
   frames.forEach((f, i) => {
     if (i > 0) { x.globalCompositeOperation = 'screen'; x.globalAlpha = alphas[i] || .4; }
     x.drawImage(f, 0, 0, S, S);
   });
+  x.restore();
   x.globalCompositeOperation = 'source-over'; x.globalAlpha = 1; x.filter = 'none';
 
   if (stock.tint) {
@@ -554,10 +646,16 @@ function bake(frames, opts = {}) {
     x.restore();
   }
   if (stock.expired) applyExpired(x, S, R);
+  if (shaderOn) {
+    const amt = Math.min(1, .18 + fx.grain / 220 + fx.leak / 260);
+    applyHalation(c, x, S, amt);
+    applyChromaticSmear(c, x, S, Math.min(1, fx.leak / 160 + fx.vignette / 360), R);
+  }
   applyVignette(x, S, Math.min(100, fx.vignette + (opts.vigBoost || 0)) / 100);
   applyGrain(x, S, fx.grain / 100);
   applyLeak(x, S, fx.leak / 100, R);
   applyDust(x, S, fx.dust / 100, R);
+  if (shaderOn) applyGateWeave(x, S, Math.min(1, fx.grain / 160 + fx.dust / 220), R);
   return c;
 }
 
@@ -577,6 +675,11 @@ function negCanvas(d) {
   if (!d._neg) d._neg = negativeDisplay(d.canvases[0]);
   return d._neg;
 }
+function labPreviewURL(d, size = 420) {
+  const c = mkCanvas(size, size), x = c.getContext('2d');
+  x.drawImage(d.negative ? negCanvas(d) : d.canvases[0], 0, 0, size, size);
+  return c.toDataURL('image/jpeg', .78);
+}
 
 /* ---------------- cards ---------------- */
 function fmtDate(d) {
@@ -587,14 +690,16 @@ function fmtDate(d) {
 function createCard({ canvases, type = 'single', frame = state.frame, caption = '', audio: audioBlob = null, negative = false }) {
   const data = {
     id: ++uid, type, frame, canvases, caption, negative,
+    stock: state.stock,
     date: fmtDate(new Date()), rot: rnd(-2.5, 2.5),
     audioURL: audioBlob ? URL.createObjectURL(audioBlob) : null,
   };
   cardData.set(data.id, data);
 
   const el = document.createElement('div');
-  el.className = `card f-${frame} t-${type}`;
+  el.className = `card lab-paper f-${frame} t-${type}` + (type === 'wiggle' ? ' lenticular' : '');
   el.dataset.id = data.id;
+  el.dataset.stock = data.stock;
   el.style.setProperty('--rot', data.rot.toFixed(2) + 'deg');
   el.style.setProperty('--tf', (0.5 + (data.id % 5) * 0.18).toFixed(2));
 
@@ -672,7 +777,7 @@ function createCard({ canvases, type = 'single', frame = state.frame, caption = 
   const mkBtn = (label, fn) => {
     const b = document.createElement('button');
     b.type = 'button'; b.textContent = label;
-    b.addEventListener('click', fn);
+    b.addEventListener('click', () => { sndLab('tool'); fn(); });
     tools.append(b);
   };
   mkBtn('png', () => exportCard(data));
@@ -711,6 +816,7 @@ function removeCard(el, data) {
   if (data.audioURL) URL.revokeObjectURL(data.audioURL);
   cardData.delete(data.id);
   el.remove();
+  updateStudioCounts();
   updateLightbox();
 }
 
@@ -779,24 +885,64 @@ function pullToWall(el) {
   el.style.top = (r.top + (r.height - el.offsetHeight) / 2) + 'px';
 }
 
+function overlapArea(a, b) {
+  const x = Math.max(0, Math.min(a.r, b.r) - Math.max(a.l, b.l));
+  const y = Math.max(0, Math.min(a.b, b.b) - Math.max(a.t, b.t));
+  return x * y;
+}
+function deskTarget(el) {
+  const w = el.offsetWidth || 210, h = el.offsetHeight || 252;
+  const minX = innerWidth < 700 ? 18 : innerWidth * .34;
+  const maxX = Math.max(minX + 12, innerWidth - w - 28);
+  const minY = 74, maxY = Math.max(100, innerHeight - h - 46);
+  const existing = [...wall.querySelectorAll('.card')]
+    .filter(card => card !== el)
+    .map(card => {
+      const l = parseFloat(card.style.left) || 0, t = parseFloat(card.style.top) || 0;
+      return { l, t, r: l + card.offsetWidth, b: t + card.offsetHeight };
+    });
+  let best = null;
+  for (let i = 0; i < 18; i++) {
+    const x = Math.round(rnd(minX, maxX));
+    const y = Math.round(rnd(minY, maxY));
+    const rect = { l: x, t: y, r: x + w, b: y + h };
+    const overlap = existing.reduce((sum, r) => sum + overlapArea(rect, r), 0);
+    const cameraPenalty = x < 430 && y > innerHeight - 420 ? 50000 : 0;
+    const score = overlap + cameraPenalty + Math.abs(x - innerWidth * .62) * .08;
+    if (!best || score < best.score) best = { x, y, score };
+  }
+  return best || { x: minX, y: minY };
+}
 function scatter(el) {
   const data = cardData.get(+el.dataset.id);
   pullToWall(el);
   bringTop(el);
   requestAnimationFrame(() => {
-    el.classList.add('scatter');
-    el.style.left = Math.round(rnd(innerWidth * .34, Math.max(innerWidth * .38, innerWidth - 270))) + 'px';
-    el.style.top = Math.round(rnd(80, Math.max(120, innerHeight - 320))) + 'px';
+    const target = deskTarget(el);
+    el.classList.add('scatter', 'settling');
+    el.style.left = target.x + 'px';
+    el.style.top = target.y + 'px';
     const rot = rnd(-9, 9);
     if (data) data.rot = rot;
     el.style.setProperty('--rot', rot.toFixed(2) + 'deg');
-    el.addEventListener('transitionend', () => el.classList.remove('scatter'), { once: true });
+    el.addEventListener('transitionend', () => {
+      el.classList.remove('scatter', 'settling');
+      if (data) {
+        const r = el.getBoundingClientRect();
+        labEvent('card-settled', {
+          id: data.id, type: data.type, frame: data.frame, stock: data.stock,
+          x: r.left, y: r.top, w: r.width, h: r.height, rot: data.rot,
+          image: labPreviewURL(data, 280),
+        });
+      }
+    }, { once: true });
   });
 }
 
 function eject(el) {
   if (trayCard) scatter(trayCard);
   trayCard = el;
+  const data = cardData.get(+el.dataset.id);
   ejector.append(el);
   const h = el.offsetHeight;
   ejector.style.height = Math.round(h * .9) + 'px';
@@ -807,6 +953,11 @@ function eject(el) {
   sndMotor(tall ? 3.2 : 2.4);
   $('.cam-shell').classList.add('kick');
   setTimeout(() => $('.cam-shell').classList.remove('kick'), 500);
+  if (data) labEvent('photo-eject', {
+    id: data.id, type: data.type, frame: data.frame, stock: data.stock,
+    image: labPreviewURL(data), tall,
+  });
+  pulseFlashBeam();
   hint('shake', 'Tip: give the photo a little shake while it develops.');
   updateLightbox();
 }
@@ -838,6 +989,22 @@ function revealNegative(el, d) {
 function flash() {
   const f = $('#flash');
   f.classList.remove('on'); void f.offsetWidth; f.classList.add('on');
+  pulseFlashBeam();
+}
+function pulseFlashBeam() {
+  const beam = $('#flashBeam');
+  if (!beam || !state.lab.spatial) return;
+  beam.innerHTML = '';
+  const count = matchMedia('(prefers-reduced-motion: reduce)').matches ? 10 : 26;
+  for (let i = 0; i < count; i++) {
+    const p = document.createElement('i');
+    p.style.setProperty('--x', rnd(8, 92).toFixed(1) + '%');
+    p.style.setProperty('--y', rnd(5, 85).toFixed(1) + '%');
+    p.style.setProperty('--d', rnd(.08, .46).toFixed(2) + 's');
+    p.style.setProperty('--s', rnd(.8, 2.6).toFixed(2));
+    beam.append(p);
+  }
+  beam.classList.remove('on'); void beam.offsetWidth; beam.classList.add('on');
 }
 async function countdown(n) {
   vfCount.classList.remove('small');
@@ -869,6 +1036,7 @@ function makeAndEject(canvases, type, opts = {}) {
     negative: !!(stock.negative && (type === 'single')),
   });
   eject(el);
+  updateStudioCounts();
   if (cardData.get(+el.dataset.id).negative)
     hint('lightbox', 'A negative. Drag it onto the lightbox to develop it.');
   return el;
@@ -1148,7 +1316,7 @@ function renderCardCanvas(d, k, o = {}) {
   x.save(); x.clip();
   x.globalAlpha = .05; applyGrain(x, Math.max(W, H), 1); x.globalAlpha = 1;
 
-  const stampFont = s => `${s}px VT323, monospace`;
+  const stampFont = s => `${s}px ${PRINT.mono}`;
   if (singleLayout) {
     const pad = 10 * k, ph = 190 * k;
     const photo = o.photo || (d.negative ? negCanvas(d) : d.canvases[0]);
@@ -1165,7 +1333,7 @@ function renderCardCanvas(d, k, o = {}) {
     if (sa > 0) {
       x.font = stampFont(17 * k); x.textAlign = 'right'; x.textBaseline = 'alphabetic';
       x.shadowColor = 'rgba(255,140,40,.8)'; x.shadowBlur = 7 * k;
-      x.fillStyle = '#ffa133'; x.globalAlpha = sa;
+      x.fillStyle = PRINT.stamp; x.globalAlpha = sa;
       x.fillText(d.date, pad + ph - 8 * k, pad + ph - 7 * k);
       x.shadowBlur = 0; x.globalAlpha = 1;
     }
@@ -1189,10 +1357,10 @@ function renderCardCanvas(d, k, o = {}) {
     }
     x.font = `600 ${8.5 * k}px "Space Grotesk", sans-serif`;
     x.textAlign = 'left'; x.textBaseline = 'middle';
-    x.fillStyle = d.frame === 'ink' ? '#9a917e' : '#8a7f6c';
+    x.fillStyle = d.frame === 'ink' ? '#9a917e' : PRINT.muted;
     x.fillText('S H O E B O X', pad + 1 * k, footY);
     x.font = stampFont(13 * k); x.textAlign = 'right';
-    x.fillStyle = '#ffa133'; x.globalAlpha = .9;
+    x.fillStyle = PRINT.stamp; x.globalAlpha = .9;
     x.fillText(d.date, W - pad - 1 * k, footY);
     x.globalAlpha = 1;
   }
@@ -1341,11 +1509,33 @@ function buildPDF(jpegU8, pw, ph) {
   return new Blob(chunks, { type: 'application/pdf' });
 }
 
+function playZineFold() {
+  const picks = latestCards(8);
+  if (picks.length < 8) { toast(`Fold preview needs 8 photos. ${8 - picks.length} more to go.`); return; }
+  const wrap = $('#zineFold'), book = $('#zineBook');
+  book.querySelectorAll('i').forEach((page, i) => {
+    page.style.backgroundImage = `linear-gradient(rgba(246,242,234,.26), rgba(246,242,234,.26)), url("${labPreviewURL(picks[i], 260)}")`;
+    page.dataset.page = String(i + 1);
+  });
+  wrap.hidden = false;
+  wrap.style.display = 'grid';
+  wrap.classList.remove('play');
+  void wrap.offsetWidth;
+  wrap.classList.add('play');
+  sndLab('fold');
+  setTimeout(() => {
+    wrap.hidden = true;
+    wrap.style.display = 'none';
+    wrap.classList.remove('play');
+  }, 3600);
+}
+
 /* classic one-sheet 8-panel zine imposition (cut the middle, fold) */
 async function exportZine() {
   const picks = latestCards(8);
   if (picks.length < 8) { toast(`A zine needs 8 photos. ${8 - picks.length} more to go.`); return; }
   await document.fonts.ready;
+  if (state.lab.spatial) playZineFold();
   toast('Folding the zine...');
   await sleep(30);
   const W = 2480, H = 1754, pw = W / 4, phh = H / 2;
@@ -1356,7 +1546,7 @@ async function exportZine() {
     x.save();
     x.translate(col * pw + pw / 2, row * phh + phh / 2);
     if (flip) x.rotate(Math.PI);
-    x.fillStyle = '#f6f2ea';
+    x.fillStyle = PRINT.paper;
     x.fillRect(-pw / 2 + 14, -phh / 2 + 14, pw - 28, phh - 28);
     const d = picks[page - 1];
     const mini = renderCardCanvas(d, 2);
@@ -1367,16 +1557,16 @@ async function exportZine() {
     x.drawImage(mini, -mw / 2, -mh / 2 + (page === 1 ? 26 : 0), mw, mh);
     x.restore();
     if (page === 1) {
-      x.fillStyle = '#3f372c';
-      x.font = '600 44px "Space Grotesk", sans-serif';
+      x.fillStyle = PRINT.ink;
+      x.font = `600 44px ${PRINT.font}`;
       x.textAlign = 'center'; x.textBaseline = 'middle';
       x.fillText('S H O E B O X', 0, -phh / 2 + 76);
-      x.font = '500 22px "Space Grotesk", sans-serif';
-      x.fillStyle = '#8a7f6c';
+      x.font = `500 22px ${PRINT.font}`;
+      x.fillStyle = PRINT.muted;
       x.fillText('a tiny zine', 0, -phh / 2 + 112);
     }
-    x.fillStyle = '#b9b09e';
-    x.font = '500 20px "Space Grotesk", sans-serif';
+    x.fillStyle = PRINT.guide;
+    x.font = `500 20px ${PRINT.font}`;
     x.textAlign = 'center'; x.textBaseline = 'alphabetic';
     x.fillText(String(page), 0, phh / 2 - 28);
     x.restore();
@@ -1385,13 +1575,13 @@ async function exportZine() {
   [[6, 0], [7, 1], [8, 2], [1, 3]].forEach(([p, col]) => drawPanel(p, col, 1, false));
 
   // guides: dashed center cut, dotted fold lines
-  x.strokeStyle = '#b9b09e'; x.lineWidth = 2;
+  x.strokeStyle = PRINT.guide; x.lineWidth = 2;
   x.setLineDash([18, 12]);
   x.beginPath(); x.moveTo(pw, H / 2); x.lineTo(3 * pw, H / 2); x.stroke();
   x.setLineDash([3, 9]);
   for (let i = 1; i < 4; i++) { x.beginPath(); x.moveTo(i * pw, 0); x.lineTo(i * pw, H); x.stroke(); }
   x.setLineDash([]);
-  x.fillStyle = '#8a7f6c'; x.font = '500 19px "Space Grotesk", sans-serif';
+  x.fillStyle = PRINT.muted; x.font = `500 19px ${PRINT.font}`;
   x.textAlign = 'left';
   x.fillText('print, cut the dashed slit, fold along the dotted lines', 24, H - 20);
 
@@ -1408,14 +1598,14 @@ async function exportPoster() {
   await sleep(30);
   const W = 1800, H = 2400;
   const c = mkCanvas(W, H), x = c.getContext('2d');
-  x.fillStyle = '#f1ead9'; x.fillRect(0, 0, W, H);
+  x.fillStyle = PRINT.paper; x.fillRect(0, 0, W, H);
   x.globalAlpha = .06; applyGrain(x, H, 1); x.globalAlpha = 1;
-  x.fillStyle = '#3f372c';
-  x.font = '700 92px "Space Grotesk", sans-serif';
+  x.fillStyle = PRINT.ink;
+  x.font = `700 92px ${PRINT.font}`;
   x.textAlign = 'center'; x.textBaseline = 'alphabetic';
   x.fillText('S H O E B O X', W / 2, 150);
-  x.font = '500 34px "Space Grotesk", sans-serif';
-  x.fillStyle = '#8a7f6c';
+  x.font = `500 34px ${PRINT.font}`;
+  x.fillStyle = PRINT.muted;
   x.fillText(`the wall, ${fmtDate(new Date()).slice(0, 3)}`, W / 2, 206);
   const cols = 3, rows = 4, cw = 470, top = 280;
   picks.forEach((d, i) => {
@@ -1463,7 +1653,9 @@ function buildPanel() {
       state.fx = { ...s.fx };
       stocks.querySelectorAll('button').forEach(o => o.classList.toggle('on', o === b));
       syncSliders();
+      syncStockTheme();
       applyPreviewFilters();
+      labEvent('stock', { stock: key, theme: STOCK_THEME[key] });
     });
     stocks.append(b);
   }
@@ -1523,6 +1715,38 @@ function updateGolden() {
   const b = $('#stocks button[data-stock="goldenhour"]');
   if (b) b.classList.toggle('golden-now', goldenFactor() > .25);
 }
+function syncStockTheme() {
+  const theme = STOCK_THEME[state.stock] || STOCK_THEME.goldenhour;
+  document.body.dataset.stock = state.stock;
+  document.body.style.setProperty('--stock-a', theme[0]);
+  document.body.style.setProperty('--stock-b', theme[1]);
+  document.body.style.setProperty('--stock-c', theme[2]);
+}
+function syncLab() {
+  document.body.classList.toggle('lab-spatial', state.lab.spatial);
+  document.body.classList.toggle('lab-shader', state.lab.shader);
+  document.body.classList.toggle('lab-lens', state.lab.lens);
+  document.body.classList.toggle('lab-soundboard', state.lab.sound);
+  const map = {
+    labSpatial: 'spatial',
+    labShader: 'shader',
+    labLens: 'lens',
+    labSound: 'sound',
+  };
+  for (const [id, key] of Object.entries(map)) {
+    const input = $('#' + id);
+    if (input) input.checked = !!state.lab[key];
+  }
+  $('#btnLab')?.setAttribute('aria-pressed', String(Object.values(state.lab).some(Boolean)));
+  labEvent('settings', { lab: { ...state.lab }, lens: state.lens, stock: state.stock });
+}
+function updateStudioCounts() {
+  const n = cardData.size;
+  const fold = $('#stFold span'), zine = $('#stZine span'), poster = $('#stPoster span');
+  if (fold) fold.textContent = n >= 8 ? 'latest 8 photos as a booklet' : `need ${8 - n} more photos`;
+  if (zine) zine.textContent = n >= 8 ? 'foldable PDF, latest 8 photos' : `need ${8 - n} more photos`;
+  if (poster) poster.textContent = n >= 12 ? 'print-size PNG, latest 12 photos' : `need ${12 - n} more photos`;
+}
 
 /* on-camera popovers */
 let popKind = null;
@@ -1537,7 +1761,8 @@ function openPopover(kind) {
   for (const [key, def] of Object.entries(defs)) {
     const b = document.createElement('button');
     b.type = 'button';
-    b.innerHTML = `${def.name || def.label}<em>${def.hint}</em>`;
+    const glass = kind === 'lens' ? `<i class="lens-mini lens-${key}" aria-hidden="true"></i>` : '';
+    b.innerHTML = `${glass}<span>${def.name || def.label}</span><em>${def.hint}</em>`;
     b.classList.toggle('on', key === current);
     b.addEventListener('click', () => {
       if (kind === 'mode') setMode(key); else setLens(key);
@@ -1553,6 +1778,8 @@ function setMode(key) {
   clearPending();
   $('#ctlMode b').textContent = MODES[key].label;
   $('#ctlMode').classList.toggle('on', key !== 'single');
+  sndLab('toggle');
+  labEvent('mode', { mode: key });
   if (key === 'motion') hint('motionMode', 'Stop motion: every shutter press adds a frame.');
 }
 function setLens(key) {
@@ -1561,9 +1788,17 @@ function setLens(key) {
   $('#ctlLens b').textContent = LENSES[key].label;
   $('#ctlLens').classList.toggle('on', key !== 'normal');
   $('#lensTag').textContent = LENSES[key].tag;
+  sndLab('lens');
+  labEvent('lens', { lens: key });
 }
 
 function bindControls() {
+  document.addEventListener('click', e => {
+    const b = e.target.closest('button, input[type="checkbox"]');
+    if (!b || b.id === 'shutter' || b.closest('.tools')) return;
+    sndLab(b.type === 'checkbox' ? 'toggle' : 'tap');
+  }, true);
+
   /* shutter: tap to shoot, hold to record a voice note */
   const shutter = $('#shutter');
   let holdT = null, recActive = false;
@@ -1626,21 +1861,32 @@ function bindControls() {
 
   $('#btnDarkroom').addEventListener('click', () => {
     $('#studio').hidden = true;
+    $('#labPanel').hidden = true;
     $('#darkroom').hidden = !$('#darkroom').hidden;
   });
   $('#btnStudio').addEventListener('click', () => {
     $('#darkroom').hidden = true;
+    $('#labPanel').hidden = true;
     const st = $('#studio');
     st.hidden = !st.hidden;
-    if (!st.hidden) {
-      const n = cardData.size;
-      $('#stZine span').textContent = n >= 8 ? 'foldable PDF, latest 8 photos' : `need ${8 - n} more photos`;
-      $('#stPoster span').textContent = n >= 12 ? 'print-size PNG, latest 12 photos' : `need ${12 - n} more photos`;
-    }
+    if (!st.hidden) updateStudioCounts();
+  });
+  $('#btnLab').addEventListener('click', () => {
+    $('#darkroom').hidden = true;
+    $('#studio').hidden = true;
+    $('#labPanel').hidden = !$('#labPanel').hidden;
   });
   $('#stWall').addEventListener('click', exportWall);
+  $('#stFold').addEventListener('click', playZineFold);
   $('#stZine').addEventListener('click', exportZine);
   $('#stPoster').addEventListener('click', exportPoster);
+  for (const [id, key] of [['#labSpatial', 'spatial'], ['#labShader', 'shader'], ['#labLens', 'lens'], ['#labSound', 'sound']]) {
+    const input = $(id);
+    input.addEventListener('change', () => {
+      state.lab[key] = input.checked;
+      syncLab();
+    });
+  }
 
   $('#btnClear').addEventListener('click', () => {
     if (!wall.children.length && !trayCard) return;
@@ -1652,6 +1898,7 @@ function bindControls() {
     wall.innerHTML = '';
     if (trayCard) { trayCard.remove(); trayCard = null; }
     cardData.clear();
+    updateStudioCounts();
     updateLightbox();
   });
   $('#btnSound').addEventListener('click', () => {
@@ -1742,6 +1989,9 @@ function sampleCards() {
 /* ---------------- boot ---------------- */
 buildPanel();
 bindControls();
+syncStockTheme();
+syncLab();
+$('#zineFold').style.display = 'none';
 setupTilt();
 setupPWA();
 requestAnimationFrame(masterLoop);

@@ -1,8 +1,8 @@
 /* SHOEBOX service worker: cache-first so the camera works fully offline. */
-const CACHE = 'shoebox-v3';
+const CACHE = 'shoebox-v6';
 const CORE = [
-  './', 'index.html', 'style.css', 'app.js', 'gif.js',
-  'manifest.webmanifest', 'icon.svg',
+  './', 'index.html', 'style.css', 'shoebox-lab.css', 'app.js', 'three-lab.js', 'gif.js',
+  'manifest.webmanifest', 'icon.svg', 'shoebox-lab.tailwind.js',
 ];
 
 self.addEventListener('install', e => {
